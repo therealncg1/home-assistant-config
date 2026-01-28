@@ -7,9 +7,12 @@
 #
 # Usage: ./ha-sync.sh
 #
-# Revision: 3.0
+# Revision: 3.1
 # Updated: 2026-01-29
-# Changes: Added packages/kitchen_lighting.yaml
+# Changes: 
+#   - Fixed sudo permission denied error (use 'sudo bash' instead of 'sudo')
+#   - Updated local path to new repo location
+#   - Added packages/kitchen_lighting.yaml
 # =============================================================================
 
 set -e
@@ -185,8 +188,10 @@ sshpass -p "$PASSWORD" scp $SSH_OPTS "$LOCAL_INSTALL_SCRIPT" "$REMOTE_USER@$REMO
 echo "   ✓ Uploaded"
 echo ""
 
+# FIX: Use 'sudo bash' to run script instead of making it executable
+# This avoids permission denied errors when /tmp has noexec mount option
 echo "🔄 Running remote install..."
-sshpass -p "$PASSWORD" ssh $SSH_OPTS "$REMOTE_USER@$REMOTE_HOST" "chmod +x $REMOTE_INSTALL_SCRIPT && echo '$PASSWORD' | sudo -S $REMOTE_INSTALL_SCRIPT"
+sshpass -p "$PASSWORD" ssh $SSH_OPTS "$REMOTE_USER@$REMOTE_HOST" "echo '$PASSWORD' | sudo -S bash $REMOTE_INSTALL_SCRIPT"
 
 # -----------------------------------------------------------------------------
 # CLEANUP
