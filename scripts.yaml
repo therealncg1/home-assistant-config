@@ -1,0 +1,117 @@
+garage_close_now:
+  alias: Garage – Close Now
+  description: ''
+  mode: single
+  sequence:
+  - service: rest_command.garage_close_now
+    data: {}
+lounge_room_blinds_standard:
+  sequence:
+  - device_id: 91a339b62b2fb308418d8b9a135b5a5d
+    domain: cover
+    entity_id: 95e7364d87a5edd2369dac022f0290e7
+    type: set_position
+    metadata:
+      secondary: false
+    position: 55
+  alias: Lounge Room Blinds Standard
+  description: ''
+set_lounge_room_blinds_to_standard:
+  alias: Set Lounge room Blinds to Standard
+  mode: single
+  sequence:
+  - action: cover.set_cover_position
+    target:
+      entity_id:
+      - cover.lounge_room_left_blind
+      - cover.lounge_room_right_blind
+    data:
+      position: 55
+  description: ''
+sigenergy_curtail_export_0_but_allow_discharge:
+  alias: Sigenergy — Curtail export (0) but allow discharge
+  mode: single
+  sequence:
+  - service: switch.turn_off
+    target:
+      entity_id: switch.sigen_0_plant_remote_ems
+  - delay: 00:00:01
+  - service: number.set_value
+    target:
+      entity_id: number.sigen_0_plant_grid_max_export_limit
+    data:
+      value: 0
+  - service: number.set_value
+    target:
+      entity_id: number.sigen_0_plant_pcs_max_export_limit
+    data:
+      value: 4294967.295
+sigenergy_set_export_discharge_limits_remote_ems_on:
+  alias: Sigenergy — Set export/discharge limits (Remote EMS ON)
+  mode: single
+  sequence:
+  - service: switch.turn_on
+    target:
+      entity_id: switch.sigen_0_plant_remote_ems
+  - service: select.select_option
+    target:
+      entity_id: select.sigen_0_plant_remote_ems_control_mode
+    data:
+      option: Command Discharging (Output power from the battery first)
+  - delay: 00:00:02
+  - service: number.set_value
+    target:
+      entity_id: number.sigen_0_plant_max_discharging_limit
+    data:
+      value: 10
+    continue_on_error: true
+  - service: number.set_value
+    target:
+      entity_id: number.sigen_0_plant_grid_max_export_limit
+    data:
+      value: 10
+  - service: number.set_value
+    target:
+      entity_id: number.sigen_0_plant_pcs_max_export_limit
+    data:
+      value: 10
+sigenergy_debug_snapshot_persistent_notification:
+  alias: Sigenergy — Debug snapshot (persistent notification)
+  mode: single
+  sequence:
+  - service: persistent_notification.create
+    data:
+      title: Sigenergy / Amber snapshot
+      message: 'FIT now: {{ states(''sensor.glenn_home_feed_in_price'') }} {{ state_attr(''sensor.glenn_home_feed_in_price'',''unit_of_measurement'')
+        }} ({{ states(''sensor.glenn_home_feed_in_price_descriptor'') }})
+
+        SoC: {{ states(''sensor.sigen_0_plant_battery_soc'') }}%
+
+        Grid export limit: {{ states(''number.sigen_0_plant_grid_max_export_limit'')
+        }} {{ state_attr(''number.sigen_0_plant_grid_max_export_limit'',''unit_of_measurement'')
+        }}
+
+        PCS export limit: {{ states(''number.sigen_0_plant_pcs_max_export_limit'')
+        }} {{ state_attr(''number.sigen_0_plant_pcs_max_export_limit'',''unit_of_measurement'')
+        }}
+
+        Grid export power: {{ states(''sensor.sigen_0_grid_sensor_export_power'')
+        }} {{ state_attr(''sensor.sigen_0_grid_sensor_export_power'',''unit_of_measurement'')
+        }}
+
+        Grid import power: {{ states(''sensor.sigen_0_grid_sensor_import_power'')
+        }} {{ state_attr(''sensor.sigen_0_grid_sensor_import_power'',''unit_of_measurement'')
+        }}
+
+        Battery discharge power: {{ states(''sensor.sigen_0_battery_discharging_power'')
+        }} {{ state_attr(''sensor.sigen_0_battery_discharging_power'',''unit_of_measurement'')
+        }}
+
+        Battery charge power: {{ states(''sensor.sigen_0_battery_charging_power'')
+        }} {{ state_attr(''sensor.sigen_0_battery_charging_power'',''unit_of_measurement'')
+        }}
+
+        House power: {{ states(''sensor.sigen_0_consumed_power'') }} {{ state_attr(''sensor.sigen_0_consumed_power'',''unit_of_measurement'')
+        }}
+
+        '

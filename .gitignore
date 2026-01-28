@@ -1,0 +1,17 @@
+# Backup files created by ha-sync.sh
+*.bak.*
+
+# Secrets (if you have them)
+secrets.yaml
+
+# macOS files
+.DS_Store
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.log

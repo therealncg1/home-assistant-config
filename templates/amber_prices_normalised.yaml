@@ -1,0 +1,65 @@
+- sensor:
+    - name: "Amber Import Price (c/kWh)"
+      unique_id: amber_import_price_c_kwh
+      unit_of_measurement: "c/kWh"
+      state_class: measurement
+      icon: mdi:cash
+      availability: >
+        {% set e = 'sensor.glenn_home_general_price' %}
+        {% set s = states(e) %}
+        {% set u = state_attr(e, 'unit_of_measurement') | string %}
+        {{ s not in ['unknown','unavailable','none',''] and u not in ['unknown','unavailable','none',''] and (('$' in u) or ('c' in u) or ('¢' in u)) }}
+      state: >
+        {% set e = 'sensor.glenn_home_general_price' %}
+        {% set v = states(e) | float(0) %}
+        {% set u = state_attr(e, 'unit_of_measurement') | string %}
+        {% if '$' in u %}
+          {{ (v * 100) | round(4) }}
+        {% else %}
+          {{ v | round(4) }}
+        {% endif %}
+      attributes:
+        source_entity: "sensor.glenn_home_general_price"
+        raw_value: "{{ states('sensor.glenn_home_general_price') }}"
+        raw_unit: "{{ state_attr('sensor.glenn_home_general_price', 'unit_of_measurement') }}"
+
+    - name: "Amber Feed-in Price (c/kWh)"
+      unique_id: amber_feed_in_price_c_kwh
+      unit_of_measurement: "c/kWh"
+      state_class: measurement
+      icon: mdi:cash-plus
+      availability: >
+        {% set e = 'sensor.glenn_home_feed_in_price' %}
+        {% set s = states(e) %}
+        {% set u = state_attr(e, 'unit_of_measurement') | string %}
+        {{ s not in ['unknown','unavailable','none',''] and u not in ['unknown','unavailable','none',''] and (('$' in u) or ('c' in u) or ('¢' in u)) }}
+      state: >
+        {% set e = 'sensor.glenn_home_feed_in_price' %}
+        {% set v = states(e) | float(0) %}
+        {% set u = state_attr(e, 'unit_of_measurement') | string %}
+        {% if '$' in u %}
+          {{ (v * 100) | round(4) }}
+        {% else %}
+          {{ v | round(4) }}
+        {% endif %}
+      attributes:
+        source_entity: "sensor.glenn_home_feed_in_price"
+        raw_value: "{{ states('sensor.glenn_home_feed_in_price') }}"
+        raw_unit: "{{ state_attr('sensor.glenn_home_feed_in_price', 'unit_of_measurement') }}"
+
+- binary_sensor:
+    - name: "Amber Feed-in Above 3.3c"
+      unique_id: amber_feed_in_above_3_3c
+      icon: mdi:transmission-tower-export
+      availability: >
+        {{ states('sensor.amber_feed_in_price_c_kwh') not in ['unknown','unavailable','none',''] }}
+      state: >
+        {{ (states('sensor.amber_feed_in_price_c_kwh') | float(0)) > 3.3 }}
+
+    - name: "Amber Import Free or Negative"
+      unique_id: amber_import_free_or_negative
+      icon: mdi:transmission-tower-import
+      availability: >
+        {{ states('sensor.amber_import_price_c_kwh') not in ['unknown','unavailable','none',''] }}
+      state: >
+        {{ (states('sensor.amber_import_price_c_kwh') | float(999999)) <= 0 }}

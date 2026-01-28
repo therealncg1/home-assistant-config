@@ -1,0 +1,140 @@
+# =============================================================================
+# KITCHEN LIGHTING PACKAGE
+# =============================================================================
+# File: packages/kitchen_lighting.yaml
+# Created: 2026-01-29
+# Description: MOES 3-button scene switch (kitchen_scene_switch_3g) control
+#              for kitchen downlights and ceiling light
+# =============================================================================
+# Button 1: Bench downlights (hall + window) - 100%, 3000K, 3s fade
+# Button 2: Ceiling light (white + RGB) - 100%, 6535K, 3s fade
+# Button 3: Sink downlight - 100%, 6535K, 3s fade
+# =============================================================================
+# Lights controlled:
+#   - light.kitchen_downlight_bench_hall (Mercator Walter SMD4106W-RGB-ZB)
+#   - light.kitchen_downlight_bench_window (Mercator Walter SMD4106W-RGB-ZB)
+#   - light.kitchen_downlight_sink (Mercator Walter SMD4106W-RGB-ZB)
+#   - light.kitchen_ceiling_light_white (Aqara T1M - white channel)
+#   - light.kitchen_ceiling_light_rgb (Aqara T1M - RGB channel)
+# =============================================================================
+
+automation:
+  # ---------------------------------------------------------------------------
+  # Button 1 — Bench Downlights Toggle
+  # ---------------------------------------------------------------------------
+  - id: kitchen_scene_switch_btn1_bench
+    alias: "Kitchen Scene Switch — Button 1 (Bench Lights)"
+    description: "Toggle bench downlights. On: 100%, 3000K, 3s fade."
+    triggers:
+      - trigger: mqtt
+        topic: zigbee2mqtt/kitchen_scene_switch_3g
+        payload: "1_single"
+        value_template: "{{ value_json.action }}"
+    conditions: []
+    actions:
+      - if:
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: light.kitchen_downlight_bench_hall
+                state: "on"
+              - condition: state
+                entity_id: light.kitchen_downlight_bench_window
+                state: "on"
+        then:
+          - action: light.turn_off
+            target:
+              entity_id:
+                - light.kitchen_downlight_bench_hall
+                - light.kitchen_downlight_bench_window
+            data:
+              transition: 3
+        else:
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.kitchen_downlight_bench_hall
+                - light.kitchen_downlight_bench_window
+            data:
+              brightness_pct: 100
+              color_temp_kelvin: 3000
+              transition: 3
+    mode: single
+    max_exceeded: silent
+
+  # ---------------------------------------------------------------------------
+  # Button 2 — Ceiling Light Toggle
+  # ---------------------------------------------------------------------------
+  - id: kitchen_scene_switch_btn2_ceiling
+    alias: "Kitchen Scene Switch — Button 2 (Ceiling Light)"
+    description: "Toggle ceiling light (white + RGB). On: 100%, 6535K, 3s fade."
+    triggers:
+      - trigger: mqtt
+        topic: zigbee2mqtt/kitchen_scene_switch_3g
+        payload: "2_single"
+        value_template: "{{ value_json.action }}"
+    conditions: []
+    actions:
+      - if:
+          - condition: or
+            conditions:
+              - condition: state
+                entity_id: light.kitchen_ceiling_light_white
+                state: "on"
+              - condition: state
+                entity_id: light.kitchen_ceiling_light_rgb
+                state: "on"
+        then:
+          - action: light.turn_off
+            target:
+              entity_id:
+                - light.kitchen_ceiling_light_white
+                - light.kitchen_ceiling_light_rgb
+            data:
+              transition: 3
+        else:
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.kitchen_ceiling_light_white
+                - light.kitchen_ceiling_light_rgb
+            data:
+              brightness_pct: 100
+              color_temp_kelvin: 6535
+              transition: 3
+    mode: single
+    max_exceeded: silent
+
+  # ---------------------------------------------------------------------------
+  # Button 3 — Sink Downlight Toggle
+  # ---------------------------------------------------------------------------
+  - id: kitchen_scene_switch_btn3_sink
+    alias: "Kitchen Scene Switch — Button 3 (Sink Light)"
+    description: "Toggle sink downlight. On: 100%, 6535K, 3s fade."
+    triggers:
+      - trigger: mqtt
+        topic: zigbee2mqtt/kitchen_scene_switch_3g
+        payload: "3_single"
+        value_template: "{{ value_json.action }}"
+    conditions: []
+    actions:
+      - if:
+          - condition: state
+            entity_id: light.kitchen_downlight_sink
+            state: "on"
+        then:
+          - action: light.turn_off
+            target:
+              entity_id: light.kitchen_downlight_sink
+            data:
+              transition: 3
+        else:
+          - action: light.turn_on
+            target:
+              entity_id: light.kitchen_downlight_sink
+            data:
+              brightness_pct: 100
+              color_temp_kelvin: 6535
+              transition: 3
+    mode: single
+    max_exceeded: silent
