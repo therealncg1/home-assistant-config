@@ -2,9 +2,15 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 3.2
-# Last Updated: 2026-01-28
+# Revision: 3.3
+# Last Updated: 2026-01-29
 # 
+# CHANGES IN 3.3:
+#   - CRITICAL FIX: Inverted switch.sigen_0_plant_remote_ems logic
+#   - switch.turn_off = ENABLE Remote EMS (HA can control inverter)
+#   - switch.turn_on = DISABLE Remote EMS (return to local Self-Consumption)
+#   - This was causing HA to think it was exporting when it wasn't
+#
 # CHANGES IN 3.2:
 #   - Fixed email line breaks using <br> tags in HTML
 #   - All times now use local timezone (Australia/Melbourne via as_local())
@@ -466,7 +472,7 @@ script:
     icon: mdi:export
     mode: single
     sequence:
-      - action: switch.turn_on
+      - action: switch.turn_off
         target:
           entity_id: switch.sigen_0_plant_remote_ems
       - delay:
@@ -494,11 +500,11 @@ script:
 
   sigenergy_disable_export:
     alias: "Sigenergy — Disable Export"
-    description: "Disable grid export, allow battery to cover house load"
+    description: "Disable grid export, return to local Self-Consumption mode"
     icon: mdi:export-variant
     mode: single
     sequence:
-      - action: switch.turn_off
+      - action: switch.turn_on
         target:
           entity_id: switch.sigen_0_plant_remote_ems
       - delay:
@@ -529,7 +535,7 @@ script:
       - action: input_boolean.turn_off
         target:
           entity_id: input_boolean.sigenergy_export_active
-      - action: switch.turn_on
+      - action: switch.turn_off
         target:
           entity_id: switch.sigen_0_plant_remote_ems
       - delay:
@@ -583,7 +589,7 @@ script:
           entity_id: number.sigen_0_plant_pcs_max_import_limit
         data:
           value: 4294967.295
-      - action: switch.turn_off
+      - action: switch.turn_on
         target:
           entity_id: switch.sigen_0_plant_remote_ems
       - delay:
@@ -596,7 +602,7 @@ script:
 
   sigenergy_force_safe_state:
     alias: "Sigenergy — Force Safe State"
-    description: "Emergency: disable all HA control and curtail export"
+    description: "Emergency: disable HA control, return to local Self-Consumption"
     icon: mdi:shield-lock
     mode: single
     sequence:
@@ -605,7 +611,7 @@ script:
           entity_id: 
             - input_boolean.sigenergy_grid_charge_active
             - input_boolean.sigenergy_export_active
-      - action: switch.turn_off
+      - action: switch.turn_on
         target:
           entity_id: switch.sigen_0_plant_remote_ems
       - delay:
