@@ -1,0 +1,157 @@
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://192.168.1.200:1883
+  user: zigbee2mqtt
+  password: zigbee2mqtt
+serial:
+  baudrate: 115200
+  rtscts: false
+  port: >-
+    /dev/serial/by-id/usb-Itead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_V2_7adcae714953ef11bc422ae0174bec31-if00-port0
+  adapter: ember
+advanced:
+  log_level: debug
+  channel: 11
+  network_key:
+    - 1
+    - 3
+    - 5
+    - 7
+    - 9
+    - 11
+    - 13
+    - 15
+    - 0
+    - 2
+    - 4
+    - 6
+    - 8
+    - 10
+    - 12
+    - 13
+  pan_id: 14940
+  ext_pan_id:
+    - 64
+    - 56
+    - 238
+    - 177
+    - 109
+    - 107
+    - 121
+    - 48
+  last_seen: disable
+frontend:
+  enabled: true
+  host: 0.0.0.0
+  port: 30066
+homeassistant:
+  enabled: true
+  experimental_event_entities: true
+devices:
+  '0x54ef44100134e881':
+    friendly_name: lounge_room_door_blind
+  '0x54ef44100134e838':
+    friendly_name: Lounge Room Right Blind
+  '0x54ef44100134eef8':
+    friendly_name: Lounge Room Left Blind
+  '0x54ef44100134e2b7':
+    friendly_name: Dining Room Door Blind
+    description: Dining Room Door Blind
+  '0x54ef44100134eeca':
+    friendly_name: Master Bedroom Left Blind
+    description: Master Bedroom – Blind Left
+    homeassistant:
+      name: Master Bedroom Left Blind
+    optimistic: true
+  '0x54ef441000d87788':
+    friendly_name: Master Bedroom Right Blind
+    description: Master Bedroom Right Blind
+  '0x7cc6b6fffecf6b52':
+    friendly_name: Master Bedroom Blinds Switch
+  '0x54ef441000cbe649':
+    friendly_name: Kitchen – Ceiling Light
+  '0x54ef441000cbd44a':
+    friendly_name: Dining – Hall Light
+    description: Dining – Hall Light
+  '0x54ef441000cbdeb8':
+    friendly_name: Dining – Door Light
+    description: Dining – Door Light
+  '0xa4c138db9f671f11':
+    friendly_name: Dining Scene Switch – 1G
+    description: Dining Scene Switch – 1G
+  # -------------------------------------------------------------------------
+  # Mercator Kitchen Downlights (SMD4106W-RGB-ZB)
+  # These have buggy firmware - settings help stabilize state reporting
+  # -------------------------------------------------------------------------
+  '0x60a423fffeaaefc3':
+    friendly_name: Kitchen Downlight Bench Hall
+    optimistic: false
+    debounce: 1000
+    debounce_ignore:
+      - state
+  '0x847127fffe9a8641':
+    friendly_name: Kitchen Downlight Bench Window
+    optimistic: false
+    debounce: 1000
+    debounce_ignore:
+      - state
+  '0x60a423fffeff216d':
+    friendly_name: Kitchen Downlight Sink
+    optimistic: false
+    debounce: 1000
+    debounce_ignore:
+      - state
+  '0x0c2a6ffffe59d039':
+    friendly_name: kitchen_scene_switch_3g
+cache_state: true
+cache_state_persistent: true
+cache_state_send_on_startup: true
+channel: 11
+elapsed: false
+ext_pan_id:
+  - 64
+  - 56
+  - 238
+  - 177
+  - 109
+  - 107
+  - 121
+  - 48
+last_seen: disable
+log_console_json: false
+log_debug_namespace_ignore: ''
+log_debug_to_mqtt_frontend: false
+log_directories_to_keep: 10
+log_directory: /app/data/log/%TIMESTAMP%
+log_file: log.log
+log_level: info
+log_namespaced_levels: {}
+log_output:
+  - console
+  - file
+log_rotation: true
+log_symlink_current: false
+log_syslog: {}
+network_key:
+  - 1
+  - 3
+  - 5
+  - 7
+  - 9
+  - 11
+  - 13
+  - 15
+  - 0
+  - 2
+  - 4
+  - 6
+  - 8
+  - 10
+  - 12
+  - 13
+output: json
+pan_id: 14940
+timestamp_format: YYYY-MM-DD HH:mm:ss
+version: 4
+availability:
+  enabled: false

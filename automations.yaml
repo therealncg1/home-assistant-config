@@ -2,522 +2,196 @@
 # HOME ASSISTANT AUTOMATIONS
 # =============================================================================
 # File: automations.yaml
-# Revision: 3.0
+# Revision: 5.0
 # Last Updated: 2026-01-29
-# 
-# CHANGES IN THIS REVISION:
-#   - Removed all Kitchen Scene Switch automations (moved to packages/kitchen_lighting.yaml)
-#   - Removed helper sync automations (no longer needed)
-#   - Removed gate/failsafe automations (no longer needed)
 #
-# PREVIOUSLY REMOVED (in packages/sigenergy.yaml):
-#   - All Sigenergy/Amber automations
-#
-# CURRENT CONTENTS:
-#   - Luyen tracking (is Home, has left)
-#   - Garage automations (snapshot webhook, mobile close action)
-#   - Master Bedroom Switch (toggle blinds)
-#   - Dining Scene Switch (single, double, hold)
-#   - Movie Time trigger
-#   - Random stop automations
-#   - Daily email (Energy — Daily Amber delay + grid export summary)
+# Kitchen and Dining automations are in: packages/scene_switches.yaml
+# Sigenergy/Amber automations are in: packages/sigenergy.yaml
 # =============================================================================
 
-- id: '1755182929932'
+- id: '1757753649313'
   alias: Luyen is Home
   description: ''
   triggers:
-  - trigger: state
-    entity_id:
-    - device_tracker.luyen_s_s10
-    from: not_home
-    to: home
+    - entity_id:
+        - person.luyen
+      to: home
+      trigger: state
   conditions: []
   actions:
-  - action: notify.mobile_app_glenns_iphone
-    metadata: {}
-    data:
-      title: Device joined Wi-Fi
-      message: '{{ state_attr(trigger.entity_id,''friendly_name'') or trigger.entity_id }} connected at {{ now().strftime(''%-I:%M %p'') }}.'
+    - action: notify.mobile_app_glenn_s_iphone_15_pro
+      data:
+        title: Luyen Tracking
+        message: Luyen is home
   mode: single
-- id: '1755183154978'
+
+- id: '1757755104316'
   alias: Luyen has left
   description: ''
   triggers:
-  - trigger: state
-    entity_id:
-    - device_tracker.luyen_s_s10
-    from: home
-    to: not_home
-    for:
-      hours: 0
-      minutes: 1
-      seconds: 0
+    - entity_id:
+        - person.luyen
+      from: home
+      trigger: state
   conditions: []
   actions:
-  - action: notify.mobile_app_glenns_iphone
-    metadata: {}
-    data:
-      message: '{{ state_attr(trigger.entity_id,''friendly_name'') or trigger.entity_id }} left Wi-Fi at {{ now().strftime(''%-I:%M %p'') }}.'
-      title: Luyen has left
+    - action: notify.mobile_app_glenn_s_iphone_15_pro
+      data:
+        title: Luyen Tracking
+        message: Luyen has left
   mode: single
-- id: '1756188348768'
+
+- id: '1757797917654'
   alias: Garage – Driveway snapshot (webhook)
   description: ''
   triggers:
-  - trigger: webhook
-    allowed_methods:
-    - POST
-    - PUT
-    local_only: true
-    webhook_id: garage_driveway_snap
+    - trigger: webhook
+      allowed_methods:
+        - POST
+        - PUT
+      local_only: true
+      webhook_id: driveway-motion-mqtt
   conditions: []
   actions:
-  - action: camera.snapshot
-    target:
-      entity_id: camera.driveway_telephoto_fluent
-    data:
-      filename: /config/www/snap/driveway.jpg
-  - action: notify.mobile_app_glenns_iphone
-    data:
-      title: Garage Door Left Open
-      message: '{{ trigger.json.reason | default(''Garage event'') }}'
+    - action: notify.mobile_app_glenn_s_iphone_15_pro
+      metadata: {}
       data:
+        message: Movement in driveway
+        title: Movement detected
         data:
-          image: http://glennmc.asuscomm.com:31111/local/snap/driveway.jpg?ts={{ now().timestamp()|int }}
-          url: /lovelace/driveway
-          clickAction: /lovelace/driveway
-          tag: garage_notify
+          entity_id: camera.driveway
   mode: single
-- id: '1756188813198'
+
+- id: '1758005044168'
   alias: Mobile action → Close Garage
   description: ''
   triggers:
-  - trigger: event
-    event_type: mobile_app_notification_action
-    event_data:
-      Key: action
-      Value: GARAGE_CLOSE
+    - event_type: ios.notification_action_fired
+      event_data:
+        actionName: CLOSE_GARAGE
+      trigger: event
   conditions: []
   actions:
-  - action: rest_command.garage_close_now
-    data: {}
-  - action: notify.mobile_app_glenns_iphone
-    data:
-      message: Closing garage…
-      data:
-        tag: garage_notify
+    - action: script.garage_close_now
+      data: {}
   mode: single
-- id: '1757922388863'
+
+- id: '1759040963334'
   alias: Master Bedroom Switch → Toggle Blinds
   description: ''
   triggers:
-  - domain: mqtt
-    device_id: 299a527b2e3257cfbecbd48ce8273bdb
-    type: action
-    subtype: 1_single
-    trigger: device
-  - domain: mqtt
-    device_id: 299a527b2e3257cfbecbd48ce8273bdb
-    type: action
-    subtype: 2_single
-    trigger: device
-  conditions: []
+    - trigger: mqtt
+      topic: zigbee2mqtt/Master Bedroom Blinds Switch
+  conditions:
+    - condition: template
+      value_template: >-
+        {{ trigger.payload_json is defined
+           and 'action' in trigger.payload_json
+           and trigger.payload_json.action not in [none, '', 'null'] }}
   actions:
-  - action: cover.toggle
-    metadata: {}
-    data: {}
-    target:
-      entity_id: cover.master_bedroom_blinds
-  mode: single
-- id: '1759134079606'
-  alias: Dining Scene Switch — Single Press (Toggle 75% / All Off)
-  description: ''
-  triggers:
-  - trigger: mqtt
-    topic: zigbee2mqtt/Dining Scene Switch – 1G/action
-    payload: single
-  conditions: []
-  actions:
-  - choose:
-    - conditions:
-      - condition: state
-        entity_id: script.scene_movie_time_kitchen_dining_ha
-        state: 'on'
-      sequence:
-      - action: script.turn_off
-        target:
-          entity_id: script.scene_movie_time_kitchen_dining_ha
-      - delay:
-          milliseconds: 200
-      - action: input_boolean.turn_off
-        target:
-          entity_id:
-          - input_boolean.kitchen_bench_dn_desired_on
-          - input_boolean.kitchen_sink_dn_desired_on
-      - action: light.turn_off
-        target:
-          entity_id:
-          - light.kitchen_ceiling_light_white
-          - light.kitchen_ceiling_light_rgb
-          - light.kitchen_downlight_sink
-          - light.kitchen_downlight_bench_hall
-          - light.kitchen_downlight_bench_window
-        data:
-          transition: 3
-      - choose:
-        - conditions:
-          - condition: state
-            entity_id: input_boolean.dining_ring_prestage_needed
-            state: 'on'
-          sequence:
-          - action: light.turn_on
-            target:
-              entity_id: light.dining_rings
-            data:
-              color_temp_kelvin: 2702
-              brightness_pct: 1
-              transition: 0
-          - delay:
-              milliseconds: 200
-      - parallel:
-        - action: light.turn_on
-          target:
-            entity_id: light.dining_whites
-          data:
-            color_temp_kelvin: 2702
-            brightness_pct: 75
-            transition: 3
-        - action: light.turn_on
-          target:
-            entity_id: light.dining_rings
-          data:
-            color_temp_kelvin: 3400
-            brightness_pct: 100
-            transition: 3
-      - action: input_boolean.turn_off
-        target:
-          entity_id: input_boolean.dining_ring_prestage_needed
-    default:
     - choose:
-      - conditions:
-        - condition: and
-          conditions:
-          - condition: state
-            entity_id: light.dining_door_light_white
-            state: 'off'
-          - condition: state
-            entity_id: light.dining_hall_light_white
-            state: 'off'
-          - condition: state
-            entity_id: light.dining_door_light_rgb
-            state: 'off'
-          - condition: state
-            entity_id: light.dining_hall_light_rgb
-            state: 'off'
-        sequence:
-        - parallel:
-          - target:
-              entity_id: light.dining_whites
-            data:
-              color_temp_kelvin: 2702
-              brightness_pct: 75
-              transition: 3
-            action: light.turn_on
-          - target:
-              entity_id: light.dining_rings
-            data:
-              color_temp_kelvin: 3400
-              brightness_pct: 100
-              transition: 3
-            action: light.turn_on
-        - target:
-            entity_id: input_boolean.dining_ring_prestage_needed
-          action: input_boolean.turn_off
+        - conditions:
+            - condition: numeric_state
+              entity_id: cover.master_bedroom_left_blind
+              attribute: current_position
+              above: 50
+          sequence:
+            - action: cover.close_cover
+              target:
+                entity_id:
+                  - cover.master_bedroom_left_blind
+                  - cover.master_bedroom_right_blind
+              data: {}
       default:
-      - choose:
-        - conditions:
-          - condition: state
-            entity_id: input_boolean.dining_ring_prestage_needed
-            state: 'on'
-          sequence:
-          - target:
-              entity_id: light.dining_rings
-            data:
-              color_temp_kelvin: 2702
-              brightness_pct: 1
-              transition: 0
-            action: light.turn_on
-          - delay:
-              milliseconds: 200
-      - target:
-          entity_id:
-          - light.dining_whites
-          - light.dining_rings
-        data:
-          transition: 3
-        action: light.turn_off
-      - target:
-          entity_id: input_boolean.dining_ring_prestage_needed
-        action: input_boolean.turn_off
+        - action: cover.set_cover_position
+          target:
+            entity_id:
+              - cover.master_bedroom_left_blind
+              - cover.master_bedroom_right_blind
+          data:
+            position: 100
   mode: single
-- id: '1759142908334'
-  alias: Dining Scene Switch — Double Press (100% warm + rings 3400K)
+
+- id: '1761650747661'
+  alias: Movie Time — Trigger (helper → script → auto-reset)
   description: ''
   triggers:
-  - trigger: mqtt
-    topic: zigbee2mqtt/Dining Scene Switch – 1G/action
-    payload: double
+    - entity_id:
+        - input_boolean.movie_time_scene_trigger
+      to: 'on'
+      trigger: state
   conditions: []
   actions:
-  - choose:
-    - conditions:
-      - condition: state
+    - action: script.turn_on
+      target:
         entity_id: script.scene_movie_time_kitchen_dining_ha
-        state: 'on'
-      sequence:
-      - action: script.turn_off
-        target:
-          entity_id: script.scene_movie_time_kitchen_dining_ha
-      - delay:
-          milliseconds: 200
-      - action: input_boolean.turn_off
-        target:
-          entity_id:
-          - input_boolean.kitchen_bench_dn_desired_on
-          - input_boolean.kitchen_sink_dn_desired_on
-      - action: light.turn_off
-        target:
-          entity_id:
-          - light.kitchen_ceiling_light_white
-          - light.kitchen_ceiling_light_rgb
-          - light.kitchen_downlight_sink
-          - light.kitchen_downlight_bench_hall
-          - light.kitchen_downlight_bench_window
-        data:
-          transition: 3
-      - choose:
-        - conditions:
-          - condition: state
-            entity_id: input_boolean.dining_ring_prestage_needed
-            state: 'on'
-          sequence:
-          - target:
-              entity_id: light.dining_rings
-            data:
-              color_temp_kelvin: 3400
-              brightness_pct: 1
-              transition: 0
-            action: light.turn_on
-          - delay:
-              milliseconds: 200
-      - parallel:
-        - target:
-            entity_id: light.dining_whites
-          data:
-            color_temp_kelvin: 3200
-            brightness_pct: 100
-            transition: 3
-          action: light.turn_on
-        - target:
-            entity_id: light.dining_rings
-          data:
-            color_temp_kelvin: 3400
-            brightness_pct: 100
-            transition: 3
-          action: light.turn_on
-      - target:
-          entity_id: input_boolean.dining_ring_prestage_needed
-        action: input_boolean.turn_off
-    default:
-    - choose:
-      - conditions:
-        - condition: state
-          entity_id: input_boolean.dining_ring_prestage_needed
-          state: 'on'
-        sequence:
-        - target:
-            entity_id: light.dining_rings
-          data:
-            color_temp_kelvin: 3400
-            brightness_pct: 1
-            transition: 0
-          action: light.turn_on
-        - delay:
-            milliseconds: 200
-    - parallel:
-      - target:
-          entity_id: light.dining_whites
-        data:
-          color_temp_kelvin: 3200
-          brightness_pct: 100
-          transition: 3
-        action: light.turn_on
-      - target:
-          entity_id: light.dining_rings
-        data:
-          color_temp_kelvin: 3400
-          brightness_pct: 100
-          transition: 3
-        action: light.turn_on
-    - target:
-        entity_id: input_boolean.dining_ring_prestage_needed
-      action: input_boolean.turn_off
+    - delay:
+        seconds: 2
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.movie_time_scene_trigger
   mode: single
-- id: '1759143342267'
-  alias: Dining Scene Switch — Hold (Whites 3200K + Rings Green)
-  description: ''
-  triggers:
-  - trigger: mqtt
-    topic: zigbee2mqtt/Dining Scene Switch – 1G/action
-    payload: hold
-  - trigger: mqtt
-    topic: zigbee2mqtt/Dining Scene Switch – 1G/action
-    payload: long
-  conditions: []
-  actions:
-  - choose:
-    - conditions:
-      - condition: state
-        entity_id: script.scene_movie_time_kitchen_dining_ha
-        state: 'on'
-      sequence:
-      - action: script.turn_off
-        target:
-          entity_id: script.scene_movie_time_kitchen_dining_ha
-      - delay:
-          milliseconds: 200
-      - action: input_boolean.turn_off
-        target:
-          entity_id:
-          - input_boolean.kitchen_bench_dn_desired_on
-          - input_boolean.kitchen_sink_dn_desired_on
-      - action: light.turn_off
-        target:
-          entity_id:
-          - light.kitchen_ceiling_light_white
-          - light.kitchen_ceiling_light_rgb
-          - light.kitchen_downlight_sink
-          - light.kitchen_downlight_bench_hall
-          - light.kitchen_downlight_bench_window
-        data:
-          transition: 3
-      - parallel:
-        - target:
-            entity_id: light.dining_whites
-          data:
-            color_temp_kelvin: 2702
-            brightness_pct: 100
-            transition: 3
-          action: light.turn_on
-        - target:
-            entity_id: light.dining_rings
-          data:
-            rgb_color:
-            - 0
-            - 255
-            - 0
-            brightness_pct: 100
-            transition: 3
-          action: light.turn_on
-      - target:
-          entity_id: input_boolean.dining_ring_prestage_needed
-        action: input_boolean.turn_on
-    default:
-    - parallel:
-      - target:
-          entity_id: light.dining_whites
-        data:
-          color_temp_kelvin: 2702
-          brightness_pct: 100
-          transition: 3
-        action: light.turn_on
-      - target:
-          entity_id: light.dining_rings
-        data:
-          rgb_color:
-          - 0
-          - 255
-          - 0
-          brightness_pct: 100
-          transition: 3
-        action: light.turn_on
-    - target:
-        entity_id: input_boolean.dining_ring_prestage_needed
-      action: input_boolean.turn_on
-  mode: single
+
 - id: '1768807954725'
   alias: Energy — Daily Amber delay + grid export summary (email)
-  description: Daily email (yesterday, local time) listing every Amber interval (feed-in + import) with effective vs HA-received time + delay, plus Sigenergy RM bucket sums + deltas.
+  description: >-
+    Daily email (yesterday, local time) listing every Amber interval
+    (feed-in + import) with effective vs HA-received time + delay,
+    plus Sigenergy RM bucket sums + deltas.
   triggers:
-  - at: 00:05:00
-    trigger: time
+    - trigger: time
+      at: '06:30:00'
   conditions: []
   actions:
-  - action: sql.query
-    data:
-      query: "WITH bounds AS (\n  SELECT\n    date_trunc('day', (now() AT TIME ZONE 'Australia/Melbourne')) - interval '1 day' AS start_local,\n    date_trunc('day', (now() AT TIME ZONE 'Australia/Melbourne')) AS end_local\n),\nraw AS (\n  SELECT\n    sm.entity_id,\n    (to_timestamp(s.last_updated_ts) AT TIME ZONE 'Australia/Melbourne') AS received_local,\n    (\n      (sa.shared_attrs::jsonb ->> 'start_time')::timestamptz\n      AT TIME ZONE 'Australia/Melbourne'\n    ) AS effective_local,\n    CASE\n      WHEN s.state ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (s.state::numeric * 100.0)\n      ELSE NULL\n    END AS price_c_kwh\n  FROM states s\n  JOIN states_meta sm ON s.metadata_id = sm.metadata_id\n  JOIN state_attributes sa ON s.attributes_id = sa.attributes_id\n  JOIN bounds b ON TRUE\n  WHERE sm.entity_id IN ('sensor.glenn_home_feed_in_price','sensor.glenn_home_general_price')\n    AND (sa.shared_attrs::jsonb ? 'start_time')\n    AND (\n      ((sa.shared_attrs::jsonb ->> 'start_time')::timestamptz\
-        \ AT TIME ZONE 'Australia/Melbourne')\n      >= (b.start_local - interval '1 hour')\n    )\n    AND (\n      ((sa.shared_attrs::jsonb ->> 'start_time')::timestamptz AT TIME ZONE 'Australia/Melbourne')\n      < b.end_local\n    )\n),\nper_interval AS (\n  SELECT\n    entity_id,\n    effective_local,\n    MIN(received_local) AS first_received_local,\n    MAX(received_local) AS last_received_local,\n    COUNT(*) AS updates,\n    (ARRAY_AGG(price_c_kwh ORDER BY received_local ASC))[1] AS first_price_c_kwh,\n    (ARRAY_AGG(price_c_kwh ORDER BY received_local DESC))[1] AS last_price_c_kwh\n  FROM raw\n  WHERE effective_local IS NOT NULL\n    AND price_c_kwh IS NOT NULL\n  GROUP BY entity_id, effective_local\n),\ninterval_prices AS (\n  SELECT\n    effective_local,\n    MAX(CASE WHEN entity_id = (SELECT feed_in_entity_id FROM params) THEN last_price_c_kwh END) AS feed_in_last_price_c_kwh,\n    MAX(CASE WHEN entity_id = (SELECT import_entity_id FROM params) THEN last_price_c_kwh END) AS\
-        \ import_last_price_c_kwh\n  FROM per_interval\n  GROUP BY effective_local\n),\nordered AS (\n  SELECT\n    p.*, \n    ip.feed_in_last_price_c_kwh,\n    ip.import_last_price_c_kwh,\n    LAG(p.first_price_c_kwh) OVER (PARTITION BY p.entity_id ORDER BY p.effective_local) AS prev_first_price_c_kwh,\n    EXTRACT(EPOCH FROM (p.first_received_local - p.effective_local)) AS delay_first_s,\n    EXTRACT(EPOCH FROM (p.last_received_local  - p.effective_local)) AS delay_last_s,\n    (p.last_price_c_kwh IS DISTINCT FROM p.first_price_c_kwh) AS is_revised,\n    (p.first_price_c_kwh IS DISTINCT FROM LAG(p.first_price_c_kwh) OVER (PARTITION BY p.entity_id ORDER BY p.effective_local)) AS is_price_change,\n    (\n      LAG(p.first_price_c_kwh) OVER (PARTITION BY p.entity_id ORDER BY p.effective_local) IS NOT NULL\n      AND (\n        (LAG(p.first_price_c_kwh) OVER (PARTITION BY p.entity_id ORDER BY p.effective_local) <= 0)\n        IS DISTINCT FROM\n        (p.first_price_c_kwh <= 0)\n      )\n\
-        \    ) AS is_grid_charge_threshold_cross,\n    (\n      LAG(p.first_price_c_kwh) OVER (PARTITION BY p.entity_id ORDER BY p.effective_local) IS NOT NULL\n      AND (\n        (LAG(p.first_price_c_kwh) OVER (PARTITION BY p.entity_id ORDER BY p.effective_local) > 3.3)\n        IS DISTINCT FROM\n        (p.first_price_c_kwh > 3.3)\n      )\n    ) AS is_export_threshold_cross\n  FROM per_interval p\n  JOIN interval_prices ip USING (effective_local)\n),\nfiltered AS (\n  SELECT\n    o.*\n  FROM ordered o\n  JOIN bounds b ON TRUE\n  WHERE o.effective_local >= b.start_local\n    AND o.effective_local <  b.end_local\n),\nstats AS (\n  SELECT\n    COUNT(*) FILTER (WHERE entity_id='sensor.glenn_home_feed_in_price') AS feed_in_intervals,\n    ROUND(AVG(delay_first_s) FILTER (WHERE entity_id='sensor.glenn_home_feed_in_price'), 1) AS feed_in_avg_delay_s,\n    ROUND(MAX(delay_first_s) FILTER (WHERE entity_id='sensor.glenn_home_feed_in_price'), 1) AS feed_in_max_delay_s,\n    SUM(CASE WHEN entity_id='sensor.glenn_home_feed_in_price'\
-        \ AND updates > 1 THEN 1 ELSE 0 END) AS feed_in_intervals_with_late_updates,\n    SUM(CASE WHEN entity_id='sensor.glenn_home_feed_in_price' AND is_revised THEN 1 ELSE 0 END) AS feed_in_intervals_with_price_revisions,\n    COUNT(*) FILTER (WHERE entity_id='sensor.glenn_home_general_price') AS import_intervals,\n    ROUND(AVG(delay_first_s) FILTER (WHERE entity_id='sensor.glenn_home_general_price'), 1) AS import_avg_delay_s,\n    ROUND(MAX(delay_first_s) FILTER (WHERE entity_id='sensor.glenn_home_general_price'), 1) AS import_max_delay_s,\n    SUM(CASE WHEN entity_id='sensor.glenn_home_general_price' AND updates > 1 THEN 1 ELSE 0 END) AS import_intervals_with_late_updates,\n    SUM(CASE WHEN entity_id='sensor.glenn_home_general_price' AND is_revised THEN 1 ELSE 0 END) AS import_intervals_with_price_revisions\n  FROM filtered\n),\nlines AS (\n  SELECT\n    f.entity_id,\n    f.effective_local,\n    f.first_received_local,\n    f.last_received_local,\n    f.updates,\n    f.prev_first_price_c_kwh\
-        \ AS from_c_kwh,\n    f.first_price_c_kwh AS to_c_kwh,\n    f.last_price_c_kwh AS final_c_kwh,\n    ROUND(f.delay_first_s)::int AS delay_s,\n    ROUND(f.delay_last_s)::int AS delay_last_s,\n    CASE\n      WHEN f.entity_id='sensor.glenn_home_feed_in_price' AND f.is_export_threshold_cross THEN\n        CASE WHEN (f.first_price_c_kwh > 3.3) THEN 'You could be exporting right now!' ELSE 'I would normally halt exporting now!' END\n      WHEN f.entity_id='sensor.glenn_home_general_price' AND f.is_grid_charge_threshold_cross THEN\n        CASE WHEN (f.first_price_c_kwh <= 0) THEN 'We are charging the battery!' ELSE 'Battery charging has stopped!' END\n      ELSE NULL\n    END AS banner_title,\n    CASE\n      WHEN f.entity_id='sensor.glenn_home_feed_in_price' AND f.is_export_threshold_cross THEN\n        CASE WHEN (f.first_price_c_kwh > 3.3) THEN 'export_on' ELSE 'export_off' END\n      WHEN f.entity_id='sensor.glenn_home_general_price' AND f.is_grid_charge_threshold_cross THEN\n     \
-        \   CASE WHEN (f.first_price_c_kwh <= 0) THEN 'charge_on' ELSE 'charge_off' END\n      ELSE NULL\n    END AS banner_kind,\n    CASE\n      WHEN f.entity_id='sensor.glenn_home_feed_in_price' THEN\n        (\n          CASE\n            WHEN f.is_revised THEN\n              'Interval prices: Feed-in ' || COALESCE(to_char(f.feed_in_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh; Import ' || COALESCE(to_char(f.import_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh.' || E'\\n' || 'Feed-in price was revised for interval starting '\n              || to_char(f.effective_local,'HH24:MI:SS')\n              || ': '\n              || to_char(f.first_price_c_kwh,'FM9990.0')\n              || ' → '\n              || to_char(f.last_price_c_kwh,'FM9990.0')\n              || ' c/kWh.'\n            WHEN f.prev_first_price_c_kwh IS NOT NULL AND f.is_price_change THEN\n              'Interval prices: Feed-in ' || COALESCE(to_char(f.feed_in_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh; Import\
-        \ ' || COALESCE(to_char(f.import_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh.' || E'\\n' || 'Feed-in price changed from '\n              || to_char(f.prev_first_price_c_kwh,'FM9990.0')\n              || ' to '\n              || to_char(f.first_price_c_kwh,'FM9990.0')\n              || ' c/kWh for interval starting '\n              || to_char(f.effective_local,'HH24:MI:SS')\n              || '.'\n            ELSE\n              'Feed-in price for interval starting '\n              || to_char(f.effective_local,'HH24:MI:SS')\n              || ' is '\n              || to_char(f.first_price_c_kwh,'FM9990.0')\n              || ' c/kWh.'\n          END\n          || CASE\n              WHEN f.is_export_threshold_cross THEN\n                E'\\nExport recommendation switched '\n                || CASE WHEN (f.first_price_c_kwh > 3.3) THEN 'ON' ELSE 'OFF' END\n                || ' (threshold 3.3 c/kWh).'\n              ELSE ''\n            END\n          || E'\\n'\n          || 'Home\
-        \ Assistant received the first update at '\n          || to_char(f.first_received_local,'HH24:MI:SS')\n          || ' (delay '\n          || ROUND(f.delay_first_s)::int\n          || 's).'\n          || CASE WHEN f.updates > 1\n              THEN (\n                ' Later updates: ' || f.updates\n                || ' total; last at ' || to_char(f.last_received_local,'HH24:MI:SS')\n                || ' (last delay '\n                || ROUND(f.delay_last_s)::int\n                || 's; final '\n                || to_char(f.last_price_c_kwh,'FM9990.0')\n                || ' c/kWh)'\n              )\n              ELSE ''\n            END\n        )\n      ELSE\n        (\n          CASE\n            WHEN f.is_revised THEN\n              'Interval prices: Feed-in ' || COALESCE(to_char(f.feed_in_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh; Import ' || COALESCE(to_char(f.import_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh.' || E'\\n' || 'Import price was revised for interval\
-        \ starting '\n              || to_char(f.effective_local,'HH24:MI:SS')\n              || ': '\n              || to_char(f.first_price_c_kwh,'FM9990.0')\n              || ' → '\n              || to_char(f.last_price_c_kwh,'FM9990.0')\n              || ' c/kWh.'\n            WHEN f.prev_first_price_c_kwh IS NOT NULL AND f.is_price_change THEN\n              'Interval prices: Feed-in ' || COALESCE(to_char(f.feed_in_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh; Import ' || COALESCE(to_char(f.import_last_price_c_kwh, 'FM9990.0'), 'n/a') || ' c/kWh.' || E'\\n' || 'Import price changed from '\n              || to_char(f.prev_first_price_c_kwh,'FM9990.0')\n              || ' to '\n              || to_char(f.first_price_c_kwh,'FM9990.0')\n              || ' c/kWh for interval starting '\n              || to_char(f.effective_local,'HH24:MI:SS')\n              || '.'\n            ELSE\n              'Import price for interval starting '\n              || to_char(f.effective_local,'HH24:MI:SS')\n\
-        \              || ' is '\n              || to_char(f.first_price_c_kwh,'FM9990.0')\n              || ' c/kWh.'\n          END\n          || CASE\n              WHEN f.is_grid_charge_threshold_cross THEN\n                E'\\nGrid-charge recommendation switched '\n                || CASE WHEN (f.first_price_c_kwh <= 0) THEN 'ON' ELSE 'OFF' END\n                || ' (threshold 0 c/kWh).'\n              ELSE ''\n            END\n          || E'\\n'\n          || 'Home Assistant received the first update at '\n          || to_char(f.first_received_local,'HH24:MI:SS')\n          || ' (delay '\n          || ROUND(f.delay_first_s)::int\n          || 's).'\n          || CASE WHEN f.updates > 1\n              THEN (\n                ' Later updates: ' || f.updates\n                || ' total; last at ' || to_char(f.last_received_local,'HH24:MI:SS')\n                || ' (last delay '\n                || ROUND(f.delay_last_s)::int\n                || 's; final '\n                || to_char(f.last_price_c_kwh,'FM9990.0')\n\
-        \                || ' c/kWh)'\n              )\n              ELSE ''\n            END\n        )\n    END AS body_text\n  FROM filtered f\n  WHERE\n    (f.prev_first_price_c_kwh IS NOT NULL AND f.is_price_change)\n    OR f.is_revised\n    OR f.is_grid_charge_threshold_cross\n    OR f.is_export_threshold_cross\n)\nSELECT\n  to_char(b.start_local,'DD/MM/YYYY') AS local_date,\n  l.entity_id,\n  to_char(l.effective_local,'DD/MM/YYYY HH24:MI:SS') AS effective_time_local,\n  to_char(l.first_received_local,'DD/MM/YYYY HH24:MI:SS') AS ha_received_time_local,\n  l.delay_s,\n  l.from_c_kwh,\n  l.to_c_kwh,\n  l.banner_title,\n  l.banner_kind,\n  l.body_text,\n  s.feed_in_intervals,\n  s.feed_in_avg_delay_s,\n  s.feed_in_max_delay_s,\n  s.feed_in_intervals_with_late_updates,\n  s.feed_in_intervals_with_price_revisions,\n  s.import_intervals,\n  s.import_avg_delay_s,\n  s.import_max_delay_s,\n  s.import_intervals_with_late_updates,\n  s.import_intervals_with_price_revisions\nFROM bounds b\n\
-        CROSS JOIN stats s\nLEFT JOIN lines l ON TRUE\nORDER BY l.effective_local NULLS LAST, l.entity_id NULLS LAST;"
-    response_variable: amber_daily
-  - action: sql.query
-    data:
-      query: "WITH bounds AS (\n  SELECT\n    date_trunc('day', (now() AT TIME ZONE 'Australia/Melbourne')) - interval '1 day' AS start_local,\n    date_trunc('day', (now() AT TIME ZONE 'Australia/Melbourne')) AS end_local\n),\nraw AS (\n  SELECT\n    (to_timestamp(s.last_updated_ts) AT TIME ZONE 'Australia/Melbourne') AS ts_local,\n    sm.entity_id,\n    CASE\n      WHEN s.state ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN s.state::numeric\n      ELSE NULL\n    END AS v\n  FROM states s\n  JOIN states_meta sm ON s.metadata_id = sm.metadata_id\n  JOIN bounds b ON TRUE\n  WHERE sm.entity_id IN (\n    'input_number.sigenergy_rm_block_grid_import_kwh',\n    'input_number.sigenergy_rm_block_grid_export_kwh',\n    'input_number.sigenergy_rm_block_house_consumption_kwh',\n    'input_number.sigenergy_rm_block_battery_charge_kwh',\n    'input_number.sigenergy_rm_block_battery_discharge_kwh',\n    'input_number.sigenergy_rm_block_soc',\n    'sensor.solaredge_i1_m1_ac_energy_exported',\n    'sensor.solaredge_i1_m1_ac_energy_imported',\n\
-        \    'sensor.sigen_0_grid_sensor_lifetime_export_energy',\n    'sensor.sigen_0_grid_sensor_lifetime_import_energy'\n  )\n  AND (to_timestamp(s.last_updated_ts) AT TIME ZONE 'Australia/Melbourne') >= b.start_local\n  AND (to_timestamp(s.last_updated_ts) AT TIME ZONE 'Australia/Melbourne') < b.end_local\n),\nsums AS (\n  SELECT\n    COALESCE(ROUND(SUM(v) FILTER (WHERE entity_id='input_number.sigenergy_rm_block_grid_export_kwh'), 3), 0) AS grid_export_kwh,\n    COALESCE(ROUND(SUM(v) FILTER (WHERE entity_id='input_number.sigenergy_rm_block_grid_import_kwh'), 3), 0) AS grid_import_kwh,\n    COALESCE(ROUND(SUM(v) FILTER (WHERE entity_id='input_number.sigenergy_rm_block_house_consumption_kwh'), 3), 0) AS house_kwh,\n    COALESCE(ROUND(SUM(v) FILTER (WHERE entity_id='input_number.sigenergy_rm_block_battery_charge_kwh'), 3), 0) AS batt_charge_kwh,\n    COALESCE(ROUND(SUM(v) FILTER (WHERE entity_id='input_number.sigenergy_rm_block_battery_discharge_kwh'), 3), 0) AS batt_discharge_kwh,\n  \
-        \  ROUND(MIN(v) FILTER (WHERE entity_id='input_number.sigenergy_rm_block_soc'), 1) AS soc_min,\n    ROUND(MAX(v) FILTER (WHERE entity_id='input_number.sigenergy_rm_block_soc'), 1) AS soc_max\n  FROM raw\n),\nexport_events AS (\n  SELECT ts_local, v\n  FROM raw\n  WHERE entity_id='input_number.sigenergy_rm_block_grid_export_kwh'\n    AND v IS NOT NULL\n    AND v > 0.001\n),\ntop_export AS (\n  SELECT ts_local, v\n  FROM export_events\n  ORDER BY v DESC\n  LIMIT 10\n),\nexport_meta AS (\n  SELECT\n    (SELECT COUNT(*) FROM export_events) AS export_buckets,\n    (SELECT MIN(ts_local) FROM export_events) AS first_export_ts,\n    (SELECT MAX(ts_local) FROM export_events) AS last_export_ts,\n    (SELECT COALESCE(\n      STRING_AGG(\n        to_char(ts_local,'HH24:MI') || '=' || to_char(v,'FM9990.000') || 'kWh',\n        ', '\n        ORDER BY v DESC\n      ),\n      ''\n    ) FROM top_export) AS top_export_list\n),\nbounds2 AS (\n  SELECT\n    to_char(start_local, 'DD/MM/YYYY') AS local_date\n\
-        \  FROM bounds\n),\ndelta_vals AS (\n  SELECT\n    (SELECT v FROM raw WHERE entity_id='sensor.solaredge_i1_m1_ac_energy_exported' ORDER BY ts_local ASC  LIMIT 1) AS se_exp_first,\n    (SELECT v FROM raw WHERE entity_id='sensor.solaredge_i1_m1_ac_energy_exported' ORDER BY ts_local DESC LIMIT 1) AS se_exp_last,\n    (SELECT v FROM raw WHERE entity_id='sensor.solaredge_i1_m1_ac_energy_imported' ORDER BY ts_local ASC  LIMIT 1) AS se_imp_first,\n    (SELECT v FROM raw WHERE entity_id='sensor.solaredge_i1_m1_ac_energy_imported' ORDER BY ts_local DESC LIMIT 1) AS se_imp_last,\n    (SELECT v FROM raw WHERE entity_id='sensor.sigen_0_grid_sensor_lifetime_export_energy' ORDER BY ts_local ASC  LIMIT 1) AS sg_exp_first,\n    (SELECT v FROM raw WHERE entity_id='sensor.sigen_0_grid_sensor_lifetime_export_energy' ORDER BY ts_local DESC LIMIT 1) AS sg_exp_last,\n    (SELECT v FROM raw WHERE entity_id='sensor.sigen_0_grid_sensor_lifetime_import_energy' ORDER BY ts_local ASC  LIMIT 1) AS sg_imp_first,\n\
-        \    (SELECT v FROM raw WHERE entity_id='sensor.sigen_0_grid_sensor_lifetime_import_energy' ORDER BY ts_local DESC LIMIT 1) AS sg_imp_last\n),\ndeltas AS (\n  SELECT\n    ROUND((se_exp_last - se_exp_first), 3) AS solaredge_export_kwh,\n    ROUND((se_imp_last - se_imp_first), 3) AS solaredge_import_kwh,\n    ROUND((sg_exp_last - sg_exp_first), 3) AS sigenergy_export_kwh,\n    ROUND((sg_imp_last - sg_imp_first), 3) AS sigenergy_import_kwh\n  FROM delta_vals\n)\nSELECT\n  b.local_date,\n  s.grid_export_kwh,\n  s.grid_import_kwh,\n  s.house_kwh,\n  s.batt_charge_kwh,\n  s.batt_discharge_kwh,\n  s.soc_min,\n  s.soc_max,\n  COALESCE(to_char(e.first_export_ts,'DD/MM/YYYY HH24:MI:SS'), '') AS first_export_ts,\n  COALESCE(to_char(e.last_export_ts,'DD/MM/YYYY HH24:MI:SS'), '') AS last_export_ts,\n  e.export_buckets,\n  e.top_export_list,\n  d.solaredge_export_kwh,\n  d.solaredge_import_kwh,\n  d.sigenergy_export_kwh,\n  d.sigenergy_import_kwh\nFROM bounds2 b\nCROSS JOIN sums s\nCROSS JOIN\
-        \ export_meta e\nCROSS JOIN deltas d;"
-    response_variable: daily_grid
-  - variables:
-      amber_rows: '{{ (amber_daily.result if amber_daily is defined and amber_daily.result is defined else []) }}'
-      amber_date: '{{ (amber_rows[0].local_date if (amber_rows | length) > 0 and amber_rows[0].local_date is defined else '''') }}'
-      feed_in_intervals: '{{ (amber_rows[0].feed_in_intervals | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      feed_in_avg_delay_s: '{{ (amber_rows[0].feed_in_avg_delay_s | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      feed_in_max_delay_s: '{{ (amber_rows[0].feed_in_max_delay_s | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      feed_in_late_updates: '{{ (amber_rows[0].feed_in_intervals_with_late_updates | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      feed_in_revisions: '{{ (amber_rows[0].feed_in_intervals_with_price_revisions | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      import_intervals: '{{ (amber_rows[0].import_intervals | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      import_avg_delay_s: '{{ (amber_rows[0].import_avg_delay_s | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      import_max_delay_s: '{{ (amber_rows[0].import_max_delay_s | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      import_late_updates: '{{ (amber_rows[0].import_intervals_with_late_updates | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      import_revisions: '{{ (amber_rows[0].import_intervals_with_price_revisions | default(''n/a'', true)) if (amber_rows|length)>0 else ''n/a'' }}'
-      r: '{{ (daily_grid.result[0] if daily_grid is defined and daily_grid.result is defined and (daily_grid.result | length) > 0 else dict()) }}'
-      amber_lines_text: "{% set ns = namespace(out=[]) %} {% for row in amber_rows if row.body_text is defined and (row.body_text | default('', true)) != '' %}\n  {% set title = (row.banner_title | default('', true)) %}\n  {% if title != '' %}\n    {% set ns.out = ns.out + [ (title ~ '\\n' ~ row.body_text) ] %}\n  {% else %}\n    {% set ns.out = ns.out + [ row.body_text ] %}\n  {% endif %}\n{% endfor %} {{ ns.out | join('\\n\\n') if (ns.out | length) > 0 else 'none' }}"
-      amber_cards_html: "{% set ns = namespace(out=[]) %} {% for row in amber_rows if row.body_text is defined and (row.body_text | default('', true)) != '' %}\n  {% set kind = (row.banner_kind | default('', true)) %}\n  {% set title = (row.banner_title | default('', true)) %}\n  {% if kind == 'export_on' %}\n    {% set accent = '#137333' %}{% set bg = '#E6F4EA' %}\n  {% elif kind == 'export_off' %}\n    {% set accent = '#E37400' %}{% set bg = '#FFF4E5' %}\n  {% elif kind == 'charge_on' %}\n    {% set accent = '#1A73E8' %}{% set bg = '#E8F0FE' %}\n  {% elif kind == 'charge_off' %}\n    {% set accent = '#D93025' %}{% set bg = '#FCE8E6' %}\n  {% else %}\n    {% set accent = '#9AA0A6' %}{% set bg = '#F1F3F4' %}\n  {% endif %}\n  {% if title != '' %}\n    {% set header_html = '<div style=\"background:' ~ bg ~ '; padding:10px 12px; font-weight:700; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;\">' ~ (title | e) ~ '</div>' %}\n  {% else %}\n    {% set header_html\
-        \ = '' %}\n  {% endif %}\n  {% set body_html = '<div style=\"padding:10px 12px; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,Liberation Mono,Courier New,monospace; white-space:pre-wrap; line-height:1.35; color:#111;\">' ~ (row.body_text | e) ~ '</div>' %}\n  {% set card = '<div style=\"border:1px solid #dadce0; border-left:6px solid ' ~ accent ~ '; border-radius:12px; overflow:hidden; margin:12px 0;\">' ~ header_html ~ body_html ~ '</div>' %}\n  {% set ns.out = ns.out + [card] %}\n{% endfor %} {{ ns.out | join('') if (ns.out | length) > 0 else '<div style=\"margin:12px 0; color:#555; font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;\">none</div>' }}"
-  - action: notify.email_glenn_energy_summary
-    data:
-      title: Daily energy summary — {{ (amber_date if amber_date != '' else (r.local_date | default('', true))) }}
-      message: 'Date (local): {{ (amber_date if amber_date != '''' else (r.local_date | default('''', true))) }}
-
-        Amber price-change + revision delay report (effective time vs HA received time)
-
-        Notes: - Decision banners ("Export automation snapshot now: master={{ states(''input_boolean.sigenergy_export_automation_enabled'') }}, threshold={{ (states(''input_number.sigenergy_export_threshold'')|float(0))|round(4) }} $/kWh ({{ (states(''input_number.sigenergy_export_threshold'')|float(0)*100)|round(2) }} c/kWh), min_soc={{ states(''input_number.sigenergy_export_min_soc'') }}%, soc={{ states(''sensor.sigen_0_plant_battery_soc'') }}%, feed_in={{ (states(''sensor.glenn_home_feed_in_price'')|float(0))|round(4) }} $/kWh, grid_export_cap={{ states(''number.sigen_0_plant_grid_max_export_limit'') }} kW, remote_ems={{ states(''switch.sigen_0_plant_remote_ems'') }}.", etc.) appear ONLY when crossing thresholds. - Grid-charge recommendation is based ONLY on the 0 c/kWh threshold. - Export recommendation is based ONLY on the 3.3 c/kWh threshold. - These lines describe price updates and what your rule WOULD do, not confirmation that Sigenergy was actually charging.
-
-        Feed-in intervals: {{ feed_in_intervals }} (avg {{ feed_in_avg_delay_s }}s, max {{ feed_in_max_delay_s }}s; intervals with later updates {{ feed_in_late_updates }}; intervals with price revisions {{ feed_in_revisions }}) Import intervals: {{ import_intervals }} (avg {{ import_avg_delay_s }}s, max {{ import_max_delay_s }}s; intervals with later updates {{ import_late_updates }}; intervals with price revisions {{ import_revisions }})
-
-        {{ amber_lines_text }}
-
-        Sigenergy RM (bucket sums) - Grid export: {{ r.grid_export_kwh | default(''n/a'', true) }} kWh - Grid import: {{ r.grid_import_kwh | default(''n/a'', true) }} kWh - House consumption: {{ r.house_kwh | default(''n/a'', true) }} kWh - Battery charge: {{ r.batt_charge_kwh | default(''n/a'', true) }} kWh - Battery discharge: {{ r.batt_discharge_kwh | default(''n/a'', true) }} kWh - SoC min/max: {{ r.soc_min | default(''n/a'', true) }}% / {{ r.soc_max | default(''n/a'', true) }}%
-
-        Export timing (based on bucket updates; threshold > 0.001 kWh) - Buckets with export: {{ r.export_buckets | default(0, true) }} - First export: {{ (r.first_export_ts if (r.first_export_ts | default('''', true)) != '''' else ''none'') }} - Last export: {{ (r.last_export_ts if (r.last_export_ts | default('''', true)) != '''' else ''none'') }} - Top buckets: {{ (r.top_export_list if (r.top_export_list | default('''', true)) != '''' else ''none'') }}
-
-        Cross-check (delta within the day window) - SolarEdge energy exported: {{ r.solaredge_export_kwh | default(''n/a'', true) }} kWh - SolarEdge energy imported: {{ r.solaredge_import_kwh | default(''n/a'', true) }} kWh - Sigenergy lifetime export delta: {{ r.sigenergy_export_kwh | default(''n/a'', true) }} kWh - Sigenergy lifetime import delta: {{ r.sigenergy_import_kwh | default(''n/a'', true) }} kWh'
+    - action: notify.email_glenn_energy_summary
       data:
-        html: "<!DOCTYPE html> <html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Daily energy summary</title>\n  </head>\n  <body style=\"margin:0; padding:0; background:#ffffff;\">\n    <div style=\"max-width:900px; margin:0 auto; padding:16px;\">\n      <div style=\"font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; color:#111;\">\n        <h2 style=\"margin:0 0 8px 0; font-size:20px; line-height:1.2;\">Daily energy summary — {{ (amber_date if amber_date != '' else (r.local_date | default('', true))) }}</h2>\n        <div style=\"margin:0 0 12px 0; color:#444;\">Date (local): <strong>{{ (amber_date if amber_date != '' else (r.local_date | default('', true))) }}</strong></div>\n\n        <div style=\"margin:0 0 10px 0; padding:10px 12px; border:1px solid #dadce0; border-radius:12px; background:#f8f9fa;\">\n          <div style=\"font-weight:700; margin-bottom:6px;\"\
-          >Amber timing + delay audit (yesterday, Melbourne time)</div>\n          <div style=\"color:#333;\">\n            Feed-in intervals: <strong>{{ feed_in_intervals }}</strong> (avg {{ feed_in_avg_delay_s }}s, max {{ feed_in_max_delay_s }}s; late updates {{ feed_in_late_updates }}; revisions {{ feed_in_revisions }})<br>\n            Import intervals: <strong>{{ import_intervals }}</strong> (avg {{ import_avg_delay_s }}s ; max {{ import_max_delay_s }}s; late updates {{ import_late_updates }}; revisions {{ import_revisions }})\n          </div>\n          <div style=\"margin-top:8px; color:#555; font-size:12px; line-height:1.35;\">\n            Decision banners appear ONLY when crossing thresholds (export &gt; 3.3 c/kWh, grid-charge &le; 0 c/kWh). This report describes price updates and what your rule WOULD do, not proof of Sigenergy behaviour.\n          </div>\n        </div>\n\n        <h3 style=\"margin:16px 0 8px 0; font-size:16px;\">Amber price-change + revision delay report</h3>\n\
-          \        {{ amber_cards_html }}\n\n        <h3 style=\"margin:18px 0 8px 0; font-size:16px;\">Sigenergy RM (bucket sums)</h3>\n        <div style=\"border:1px solid #dadce0; border-radius:12px; padding:10px 12px;\">\n          <div>Grid export: <strong>{{ r.grid_export_kwh | default('n/a', true) }}</strong> kWh</div>\n          <div>Grid import: <strong>{{ r.grid_import_kwh | default('n/a', true) }}</strong> kWh</div>\n          <div>House consumption: <strong>{{ r.house_kwh | default('n/a', true) }}</strong> kWh</div>\n          <div>Battery charge: <strong>{{ r.batt_charge_kwh | default('n/a', true) }}</strong> kWh</div>\n          <div>Battery discharge: <strong>{{ r.batt_discharge_kwh | default('n/a', true) }}</strong> kWh</div>\n          <div>SoC min/max: <strong>{{ r.soc_min | default('n/a', true) }}</strong>% / <strong>{{ r.soc_max | default('n/a', true) }}</strong>%</div>\n        </div>\n\n        <h3 style=\"margin:18px 0 8px 0; font-size:16px;\">Export timing (bucket\
-          \ updates; threshold &gt; 0.001 kWh)</h3>\n        <div style=\"border:1px solid #dadce0; border-radius:12px; padding:10px 12px;\">\n          <div>Buckets with export: <strong>{{ r.export_buckets | default(0, true) }}</strong></div>\n          <div>First export: <strong>{{ (r.first_export_ts if (r.first_export_ts | default('', true)) != '' else 'none') }}</strong></div>\n          <div>Last export: <strong>{{ (r.last_export_ts if (r.last_export_ts | default('', true)) != '' else 'none') }}</strong></div>\n          <div>Top buckets: <strong>{{ (r.top_export_list if (r.top_export_list | default('', true)) != '' else 'none') }}</strong></div>\n        </div>\n\n        <h3 style=\"margin:18px 0 8px 0; font-size:16px;\">Cross-check (delta within the day window)</h3>\n        <div style=\"border:1px solid #dadce0; border-radius:12px; padding:10px 12px;\">\n          <div>SolarEdge energy exported: <strong>{{ r.solaredge_export_kwh | default('n/a', true) }}</strong> kWh</div>\n   \
-          \       <div>SolarEdge energy imported: <strong>{{ r.solaredge_import_kwh | default('n/a', true) }}</strong> kWh</div>\n          <div>Sigenergy lifetime export delta: <strong>{{ r.sigenergy_export_kwh | default('n/a', true) }}</strong> kWh</div>\n          <div>Sigenergy lifetime import delta: <strong>{{ r.sigenergy_import_kwh | default('n/a', true) }}</strong> kWh</div>\n        </div>\n      </div>\n    </div>\n  </body>\n</html>"
+        title: 'Amber + Sigenergy Daily Summary — {{ now().strftime(''%A %d %B %Y'') }}'
+        message: |
+          {% set yesterday = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
+          
+          == AMBER FEED-IN INTERVALS ({{ yesterday }}) ==
+          
+          {% set ns = namespace(rows=[]) %}
+          {% set query_fit = "
+            SELECT
+              to_char(effective_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI') AS eff,
+              to_char(ha_received_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI:SS') AS rcv,
+              EXTRACT(EPOCH FROM (ha_received_at - effective_at))::int AS delay_s,
+              ROUND(price_kwh::numeric, 2) AS price
+            FROM amber_prices
+            WHERE interval_type = 'FeedIn'
+              AND DATE(effective_at AT TIME ZONE 'Australia/Melbourne') = '" ~ yesterday ~ "'
+            ORDER BY effective_at
+          " %}
+          {% set result_fit = state_attr('sensor.pg_amber_feed_in_intervals', 'query_result') or [] %}
+          {% for r in result_fit %}
+          {{ r.eff }} | rcv {{ r.rcv }} | delay {{ r.delay_s }}s | {{ r.price }} c/kWh
+          {% endfor %}
+          
+          == AMBER IMPORT INTERVALS ({{ yesterday }}) ==
+          
+          {% set query_imp = "
+            SELECT
+              to_char(effective_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI') AS eff,
+              to_char(ha_received_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI:SS') AS rcv,
+              EXTRACT(EPOCH FROM (ha_received_at - effective_at))::int AS delay_s,
+              ROUND(price_kwh::numeric, 2) AS price
+            FROM amber_prices
+            WHERE interval_type = 'Import'
+              AND DATE(effective_at AT TIME ZONE 'Australia/Melbourne') = '" ~ yesterday ~ "'
+            ORDER BY effective_at
+          " %}
+          {% set result_imp = state_attr('sensor.pg_amber_import_intervals', 'query_result') or [] %}
+          {% for r in result_imp %}
+          {{ r.eff }} | rcv {{ r.rcv }} | delay {{ r.delay_s }}s | {{ r.price }} c/kWh
+          {% endfor %}
+          
+          == SIGENERGY RIEMANN SUM BUCKETS ==
+          
+          Grid Export:  {{ states('sensor.sigen_0_grid_sensor_export_energy_sum') }} kWh
+          Grid Import:  {{ states('sensor.sigen_0_grid_sensor_import_energy_sum') }} kWh
+          Battery Chg:  {{ states('sensor.sigen_0_battery_charging_energy_sum') }} kWh
+          Battery Dis:  {{ states('sensor.sigen_0_battery_discharging_energy_sum') }} kWh
+          PV Yield:     {{ states('sensor.sigen_0_pv_total_yield_energy_sum') }} kWh
+          Consumed:     {{ states('sensor.sigen_0_consumed_energy_sum') }} kWh
   mode: single

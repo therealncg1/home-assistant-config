@@ -2,7 +2,15 @@
 # KITCHEN LIGHTING PACKAGE
 # =============================================================================
 # File: packages/kitchen_lighting.yaml
+# Revision: 1.1
 # Created: 2026-01-29
+# Updated: 2026-01-29
+# 
+# Changes in 1.1:
+#   - Fixed Mercator downlights (Buttons 1 & 3) not responding on first click
+#   - Added staged turn-on: wake at 1% → set color temp → fade to target
+#   - Aqara ceiling light (Button 2) unchanged (works with single command)
+#
 # Description: MOES 3-button scene switch (kitchen_scene_switch_3g) control
 #              for kitchen downlights and ceiling light
 # =============================================================================
@@ -22,9 +30,11 @@ automation:
   # ---------------------------------------------------------------------------
   # Button 1 — Bench Downlights Toggle
   # ---------------------------------------------------------------------------
+  # Mercator lights need staged turn-on: wake → color → brightness
+  # ---------------------------------------------------------------------------
   - id: kitchen_scene_switch_btn1_bench
     alias: "Kitchen Scene Switch — Button 1 (Bench Lights)"
-    description: "Toggle bench downlights. On: 100%, 3000K, 3s fade."
+    description: "Toggle bench downlights. On: 100%, 3000K, 3s fade. Staged for Mercator compatibility."
     triggers:
       - trigger: mqtt
         topic: zigbee2mqtt/kitchen_scene_switch_3g
@@ -42,6 +52,7 @@ automation:
                 entity_id: light.kitchen_downlight_bench_window
                 state: "on"
         then:
+          # --- TURN OFF ---
           - action: light.turn_off
             target:
               entity_id:
@@ -50,6 +61,30 @@ automation:
             data:
               transition: 3
         else:
+          # --- TURN ON (staged for Mercator) ---
+          # Step 1: Wake lights at 1% (no transition)
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.kitchen_downlight_bench_hall
+                - light.kitchen_downlight_bench_window
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 150
+          # Step 2: Set color temperature (no transition)
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.kitchen_downlight_bench_hall
+                - light.kitchen_downlight_bench_window
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 150
+          # Step 3: Fade to target brightness
           - action: light.turn_on
             target:
               entity_id:
@@ -57,13 +92,14 @@ automation:
                 - light.kitchen_downlight_bench_window
             data:
               brightness_pct: 100
-              color_temp_kelvin: 3000
               transition: 3
     mode: single
     max_exceeded: silent
 
   # ---------------------------------------------------------------------------
   # Button 2 — Ceiling Light Toggle
+  # ---------------------------------------------------------------------------
+  # Aqara T1M handles combined commands fine - no staging needed
   # ---------------------------------------------------------------------------
   - id: kitchen_scene_switch_btn2_ceiling
     alias: "Kitchen Scene Switch — Button 2 (Ceiling Light)"
@@ -108,9 +144,11 @@ automation:
   # ---------------------------------------------------------------------------
   # Button 3 — Sink Downlight Toggle
   # ---------------------------------------------------------------------------
+  # Mercator lights need staged turn-on: wake → color → brightness
+  # ---------------------------------------------------------------------------
   - id: kitchen_scene_switch_btn3_sink
     alias: "Kitchen Scene Switch — Button 3 (Sink Light)"
-    description: "Toggle sink downlight. On: 100%, 6535K, 3s fade."
+    description: "Toggle sink downlight. On: 100%, 6535K, 3s fade. Staged for Mercator compatibility."
     triggers:
       - trigger: mqtt
         topic: zigbee2mqtt/kitchen_scene_switch_3g
@@ -123,18 +161,38 @@ automation:
             entity_id: light.kitchen_downlight_sink
             state: "on"
         then:
+          # --- TURN OFF ---
           - action: light.turn_off
             target:
               entity_id: light.kitchen_downlight_sink
             data:
               transition: 3
         else:
+          # --- TURN ON (staged for Mercator) ---
+          # Step 1: Wake light at 1% (no transition)
+          - action: light.turn_on
+            target:
+              entity_id: light.kitchen_downlight_sink
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 150
+          # Step 2: Set color temperature (no transition)
+          - action: light.turn_on
+            target:
+              entity_id: light.kitchen_downlight_sink
+            data:
+              color_temp_kelvin: 6535
+              transition: 0
+          - delay:
+              milliseconds: 150
+          # Step 3: Fade to target brightness
           - action: light.turn_on
             target:
               entity_id: light.kitchen_downlight_sink
             data:
               brightness_pct: 100
-              color_temp_kelvin: 6535
               transition: 3
     mode: single
     max_exceeded: silent
