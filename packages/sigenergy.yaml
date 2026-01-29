@@ -2,34 +2,32 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 3.3
+# Revision: 3.5
 # Last Updated: 2026-01-29
 # 
-# CHANGES IN 3.3:
-#   - CRITICAL FIX: Inverted switch.sigen_0_plant_remote_ems logic
-#   - switch.turn_off = ENABLE Remote EMS (HA can control inverter)
-#   - switch.turn_on = DISABLE Remote EMS (return to local Self-Consumption)
-#   - This was causing HA to think it was exporting when it wasn't
+# CHANGES IN 3.5:
+#   - CRITICAL FIX: Corrected switch logic after live testing
+#   - switch.turn_on = ENABLE Remote EMS (HA controls inverter)
+#   - switch.turn_off = DISABLE Remote EMS (local Self-Consumption)
+#   - Fixed watchdog to monitor correct state
+#   - All scripts now use correct switch direction
 #
-# CHANGES IN 3.2:
-#   - Fixed email line breaks using <br> tags in HTML
-#   - All times now use local timezone (Australia/Melbourne via as_local())
-#   - Added note about later updates being in daily email
+# REMOTE EMS SWITCH BEHAVIOR (confirmed via testing):
+#   - switch.turn_on = Remote EMS ENABLED (HA controls inverter)
+#   - switch.turn_off = Remote EMS DISABLED (local Self-Consumption)
 #
-# CHANGES IN 3.1:
-#   - Removed template sensors for amber prices (conflict with templates folder)
-#   - Uses raw sensors directly: sensor.glenn_home_feed_in_price ($/kWh)
+# OPERATING STRATEGY:
+#   - Always stay in Remote EMS mode (switch ON)
+#   - Export ON: Mode=Max Self-consumption, Export Limit=5kW
+#   - Export OFF: Mode=Max Self-consumption, Export Limit=0kW
+#   - Grid Charge: Mode=Command Charging, Export Limit=0kW
+#   - Battery still covers house load when export limit=0
 #
 # COLOR CODING:
 #   - Green (#137333 / #E6F4EA): I am exporting now!
 #   - Red (#D93025 / #FCE8E6): I have stopped exporting!
 #   - Orange (#E37400 / #FFF4E5): I am charging the battery!
 #   - Blue (#1A73E8 / #E8F0FE): I have stopped charging the battery!
-#
-# RAW SENSOR REFERENCE:
-#   - sensor.glenn_home_feed_in_price = $/kWh (multiply by 100 for c/kWh)
-#   - sensor.glenn_home_general_price = $/kWh (multiply by 100 for c/kWh)
-#   - input_number.sigenergy_export_threshold = $/kWh (0.033 = 3.3c)
 # =============================================================================
 
 # =============================================================================
@@ -57,7 +55,7 @@ input_boolean:
     icon: mdi:bell-off
 
 # =============================================================================
-# INPUT NUMBERS - Thresholds, Settings, and Price Tracking
+# INPUT NUMBERS
 # =============================================================================
 input_number:
   sigenergy_export_threshold:
@@ -418,7 +416,23 @@ template:
           {% set helper = 'input_number.sigenergy_min_soc_hour_' ~ '%02d' | format(hour) %}
           {{ states(helper) | float(20) }}
 
+      - name: "Sigenergy — Remote EMS Status"
+        unique_id: sigenergy_remote_ems_status
+        icon: mdi:remote
+        state: >
+          {% if is_state('switch.sigen_0_plant_remote_ems', 'on') %}
+            Active (HA controlling)
+          {% else %}
+            Inactive (local mode)
+          {% endif %}
+
   - binary_sensor:
+      - name: "Sigenergy — Remote EMS Active"
+        unique_id: sigenergy_remote_ems_active
+        icon: mdi:remote
+        state: >
+          {{ is_state('switch.sigen_0_plant_remote_ems', 'on') }}
+
       - name: "Sigenergy — Export Allowed"
         unique_id: sigenergy_export_allowed
         icon: mdi:export
@@ -466,17 +480,62 @@ template:
 # SCRIPTS
 # =============================================================================
 script:
-  sigenergy_enable_export:
-    alias: "Sigenergy — Enable Export"
-    description: "Enable grid export with Maximum Self-consumption mode"
-    icon: mdi:export
+  # ---------------------------------------------------------------------------
+  # ENSURE REMOTE EMS - Call on startup to guarantee HA control
+  # ---------------------------------------------------------------------------
+  sigenergy_ensure_remote_ems:
+    alias: "Sigenergy — Ensure Remote EMS Active"
+    description: "Ensure system is in Remote EMS mode (HA control enabled)"
+    icon: mdi:remote
     mode: single
     sequence:
-      - action: switch.turn_off
+      - action: switch.turn_on
         target:
           entity_id: switch.sigen_0_plant_remote_ems
       - delay:
           seconds: 2
+      - action: select.select_option
+        target:
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Maximum Self-consumption (Default)"
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: 0
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_export_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_import_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_import_limit
+        data:
+          value: 4294967.295
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.sigenergy_export_active
+            - input_boolean.sigenergy_grid_charge_active
+
+  # ---------------------------------------------------------------------------
+  # ENABLE EXPORT - Set export limit to allow grid export
+  # ---------------------------------------------------------------------------
+  sigenergy_enable_export:
+    alias: "Sigenergy — Enable Export"
+    description: "Enable grid export (set limit to configured value)"
+    icon: mdi:export
+    mode: single
+    sequence:
       - action: select.select_option
         target:
           entity_id: select.sigen_0_plant_remote_ems_control_mode
@@ -498,15 +557,20 @@ script:
         target:
           entity_id: input_boolean.sigenergy_export_active
 
+  # ---------------------------------------------------------------------------
+  # DISABLE EXPORT - Set export limit to zero (battery still covers house)
+  # ---------------------------------------------------------------------------
   sigenergy_disable_export:
     alias: "Sigenergy — Disable Export"
-    description: "Disable grid export, return to local Self-Consumption mode"
+    description: "Disable grid export (set limit to 0, battery still powers house)"
     icon: mdi:export-variant
     mode: single
     sequence:
-      - action: switch.turn_on
+      - action: select.select_option
         target:
-          entity_id: switch.sigen_0_plant_remote_ems
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Maximum Self-consumption (Default)"
       - delay:
           seconds: 1
       - action: number.set_value
@@ -523,6 +587,9 @@ script:
         target:
           entity_id: input_boolean.sigenergy_export_active
 
+  # ---------------------------------------------------------------------------
+  # START GRID CHARGE - Switch to Command Charging mode
+  # ---------------------------------------------------------------------------
   sigenergy_start_grid_charge:
     alias: "Sigenergy — Start Grid Charge"
     description: "Start charging battery from grid (free/negative prices)"
@@ -535,11 +602,6 @@ script:
       - action: input_boolean.turn_off
         target:
           entity_id: input_boolean.sigenergy_export_active
-      - action: switch.turn_off
-        target:
-          entity_id: switch.sigen_0_plant_remote_ems
-      - delay:
-          seconds: 2
       - action: select.select_option
         target:
           entity_id: select.sigen_0_plant_remote_ems_control_mode
@@ -563,9 +625,12 @@ script:
         data:
           value: 4294967.295
 
+  # ---------------------------------------------------------------------------
+  # STOP GRID CHARGE - Return to Maximum Self-consumption
+  # ---------------------------------------------------------------------------
   sigenergy_stop_grid_charge:
     alias: "Sigenergy — Stop Grid Charge"
-    description: "Stop grid charging and return to normal operation"
+    description: "Stop grid charging and return to self-consumption"
     icon: mdi:battery-off
     mode: single
     sequence:
@@ -581,6 +646,11 @@ script:
           seconds: 1
       - action: number.set_value
         target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: 0
+      - action: number.set_value
+        target:
           entity_id: number.sigen_0_plant_grid_max_import_limit
         data:
           value: 4294967.295
@@ -589,20 +659,13 @@ script:
           entity_id: number.sigen_0_plant_pcs_max_import_limit
         data:
           value: 4294967.295
-      - action: switch.turn_on
-        target:
-          entity_id: switch.sigen_0_plant_remote_ems
-      - delay:
-          seconds: 1
-      - action: number.set_value
-        target:
-          entity_id: number.sigen_0_plant_grid_max_export_limit
-        data:
-          value: 0
 
+  # ---------------------------------------------------------------------------
+  # FORCE SAFE STATE - Emergency reset to safe defaults
+  # ---------------------------------------------------------------------------
   sigenergy_force_safe_state:
     alias: "Sigenergy — Force Safe State"
-    description: "Emergency: disable HA control, return to local Self-Consumption"
+    description: "Emergency: reset to safe defaults within Remote EMS"
     icon: mdi:shield-lock
     mode: single
     sequence:
@@ -611,9 +674,11 @@ script:
           entity_id: 
             - input_boolean.sigenergy_grid_charge_active
             - input_boolean.sigenergy_export_active
-      - action: switch.turn_on
+      - action: select.select_option
         target:
-          entity_id: switch.sigen_0_plant_remote_ems
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Maximum Self-consumption (Default)"
       - delay:
           seconds: 1
       - action: number.set_value
@@ -637,6 +702,27 @@ script:
         data:
           value: 4294967.295
 
+  # ---------------------------------------------------------------------------
+  # EXIT REMOTE EMS - Only use if you need to return to fully local control
+  # ---------------------------------------------------------------------------
+  sigenergy_exit_remote_ems:
+    alias: "Sigenergy — Exit Remote EMS (Local Mode)"
+    description: "Return to local Self-Consumption (HA loses control)"
+    icon: mdi:home-remove
+    mode: single
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: 
+            - input_boolean.sigenergy_grid_charge_active
+            - input_boolean.sigenergy_export_active
+      - action: switch.turn_off
+        target:
+          entity_id: switch.sigen_0_plant_remote_ems
+
+  # ---------------------------------------------------------------------------
+  # INITIALIZE SOC SCHEDULE
+  # ---------------------------------------------------------------------------
   sigenergy_initialize_soc_schedule:
     alias: "Sigenergy — Initialize SOC Schedule (Conservative)"
     description: "Set all hourly SOC minimums to Conservative mode values"
@@ -784,6 +870,9 @@ script:
         data:
           value: 0
 
+  # ---------------------------------------------------------------------------
+  # DEBUG SNAPSHOT
+  # ---------------------------------------------------------------------------
   sigenergy_debug_snapshot:
     alias: "Sigenergy — Debug Snapshot"
     description: "Show current system state in a persistent notification"
@@ -795,29 +884,92 @@ script:
           title: "Sigenergy Debug Snapshot"
           notification_id: sigenergy_debug
           message: >
-            **Time:** {{ now().strftime('%Y-%m-%d %H:%M:%S %Z') }}
+            **Time:** {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
             
+            === REMOTE EMS STATUS ===
+            **Switch State:** {{ states('switch.sigen_0_plant_remote_ems') }} (on=HA control, off=local)
+            **Remote EMS Active:** {{ states('binary_sensor.sigenergy_remote_ems_active') }}
+            **EMS Mode:** {{ states('select.sigen_0_plant_remote_ems_control_mode') }}
+            
+            === HA CONTROL STATUS ===
             **Master Enabled:** {{ states('input_boolean.sigenergy_master_enabled') }}
             **Export Active:** {{ states('input_boolean.sigenergy_export_active') }}
             **Grid Charge Active:** {{ states('input_boolean.sigenergy_grid_charge_active') }}
-            
-            **Battery SOC:** {{ states('sensor.sigen_0_plant_battery_soc') }}%
-            **Current Min SOC:** {{ states('sensor.sigenergy_current_min_soc') }}%
             **Export Allowed:** {{ states('binary_sensor.sigenergy_export_allowed') }}
             
-            **Feed-in Price:** {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh
-            **Import Price:** {{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }} c/kWh
-            **Export Threshold:** {{ (states('input_number.sigenergy_export_threshold') | float(0) * 100) | round(1) }} c/kWh
+            === LIMITS ===
+            **Grid Export Limit:** {{ states('number.sigen_0_plant_grid_max_export_limit') }} kW
+            **PCS Export Limit:** {{ states('number.sigen_0_plant_pcs_max_export_limit') }} kW
             
-            **Remote EMS:** {{ states('switch.sigen_0_plant_remote_ems') }}
-            **EMS Mode:** {{ states('select.sigen_0_plant_remote_ems_control_mode') }}
-            **Export Limit:** {{ states('number.sigen_0_plant_grid_max_export_limit') }} kW
+            === BATTERY ===
+            **SOC:** {{ states('sensor.sigen_0_plant_battery_soc') }}%
+            **Min SOC (this hour):** {{ states('sensor.sigenergy_current_min_soc') }}%
+            
+            === PRICES ===
+            **Feed-in:** {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh
+            **Import:** {{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }} c/kWh
+            **Export Threshold:** {{ (states('input_number.sigenergy_export_threshold') | float(0) * 100) | round(1) }} c/kWh
 
 # =============================================================================
 # AUTOMATIONS
 # =============================================================================
 automation:
+  # ===========================================================================
+  # HA START - Ensure Remote EMS is active
+  # ===========================================================================
+  - id: 'sigenergy_ha_start_ensure_remote_ems'
+    alias: "Sigenergy — HA Start: Ensure Remote EMS"
+    description: "On HA start, ensure Remote EMS is active and evaluate state"
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+    actions:
+      - delay:
+          seconds: 30
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_ensure_remote_ems
+      - delay:
+          seconds: 5
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sigenergy_master_enabled
+                state: "on"
+              - condition: state
+                entity_id: binary_sensor.sigenergy_export_allowed
+                state: "on"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_enable_export
+
+  # ===========================================================================
+  # REMOTE EMS WATCHDOG - Re-enable if accidentally disabled
+  # ===========================================================================
+  - id: 'sigenergy_remote_ems_watchdog'
+    alias: "Sigenergy — Remote EMS Watchdog"
+    description: "Re-enable Remote EMS if it gets disabled while master is on"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: switch.sigen_0_plant_remote_ems
+        to: "off"
+        for:
+          seconds: 10
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_ensure_remote_ems
+
+  # ===========================================================================
   # PRICE TRACKING
+  # ===========================================================================
   - id: 'sigenergy_track_feed_in_price'
     alias: "Sigenergy — Track Feed-in Price Changes"
     mode: restart
@@ -856,7 +1008,9 @@ automation:
         data:
           value: "{{ (trigger.from_state.state | float(0) * 100) | round(2) }}"
 
+  # ===========================================================================
   # EXPORT POLICY
+  # ===========================================================================
   - id: 'sigenergy_export_policy'
     alias: "Sigenergy — Export Policy"
     mode: restart
@@ -901,7 +1055,9 @@ automation:
                 target:
                   entity_id: script.sigenergy_disable_export
 
+  # ===========================================================================
   # GRID CHARGE START
+  # ===========================================================================
   - id: 'sigenergy_grid_charge_start'
     alias: "Sigenergy — Grid Charge: Start"
     mode: single
@@ -921,7 +1077,9 @@ automation:
         target:
           entity_id: script.sigenergy_start_grid_charge
 
+  # ===========================================================================
   # GRID CHARGE STOP
+  # ===========================================================================
   - id: 'sigenergy_grid_charge_stop'
     alias: "Sigenergy — Grid Charge: Stop"
     mode: single
@@ -960,15 +1118,16 @@ automation:
           soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
           min_soc: "{{ states('sensor.sigenergy_current_min_soc') | float(20) | round(0) }}"
           soc_ok: "{{ soc >= min_soc }}"
+          master_on: "{{ is_state('input_boolean.sigenergy_master_enabled', 'on') }}"
           start_time_attr: "{{ state_attr('sensor.glenn_home_feed_in_price', 'start_time') }}"
           interval_start_local: "{% if start_time_attr %}{{ as_local(as_datetime(start_time_attr)).strftime('%H:%M:%S') }}{% else %}{{ now().strftime('%H:%M:%S') }}{% endif %}"
           interval_hour_local: "{% if start_time_attr %}{{ as_local(as_datetime(start_time_attr)).strftime('%H:%M') }}{% else %}{{ now().strftime('%H:%M') }}{% endif %}"
           ha_received_local: "{{ now().strftime('%H:%M:%S') }}"
           delay_s: "{% if start_time_attr %}{{ ((now() - as_datetime(start_time_attr)).total_seconds()) | int }}{% else %}0{% endif %}"
-          action_title: "{% if soc_ok %}I am exporting now!{% else %}Export blocked — SOC too low{% endif %}"
-          accent_color: "{% if soc_ok %}#137333{% else %}#E37400{% endif %}"
-          bg_color: "{% if soc_ok %}#E6F4EA{% else %}#FFF4E5{% endif %}"
-          soc_line: "{% if soc_ok %}Current battery state of charge: {{ soc }}%{% else %}Export was blocked because battery SOC of {{ soc }}% did not meet the {{ min_soc }}% reserve required for {{ interval_hour_local }}{% endif %}"
+          action_title: "{% if not master_on %}Export blocked — Master disabled{% elif not soc_ok %}Export blocked — SOC too low{% else %}I am exporting now!{% endif %}"
+          accent_color: "{% if master_on and soc_ok %}#137333{% else %}#E37400{% endif %}"
+          bg_color: "{% if master_on and soc_ok %}#E6F4EA{% else %}#FFF4E5{% endif %}"
+          soc_line: "{% if not master_on %}Export was blocked because Master is disabled{% elif not soc_ok %}Export was blocked because battery SOC of {{ soc }}% did not meet the {{ min_soc }}% reserve required for {{ interval_hour_local }}{% else %}Current battery state of charge: {{ soc }}%{% endif %}"
           email_subject: "Feed-in price changed from {{ feed_in_prev }} to {{ feed_in_now }} c/kWh for interval starting {{ interval_start_local }}"
       - action: notify.mobile_app_glenns_iphone
         data:
@@ -1119,11 +1278,9 @@ automation:
         entity_id: input_boolean.sigenergy_master_enabled
         to: "on"
     actions:
-      - action: input_boolean.turn_off
+      - action: script.turn_on
         target:
-          entity_id: 
-            - input_boolean.sigenergy_grid_charge_active
-            - input_boolean.sigenergy_export_active
+          entity_id: script.sigenergy_ensure_remote_ems
 
   # ===========================================================================
   # SAFETY AUTOMATIONS
@@ -1176,7 +1333,7 @@ automation:
       - action: notify.mobile_app_glenns_iphone
         data:
           title: "🚨 Critical Battery (5%)"
-          message: "SOC: {{ states('sensor.sigen_0_plant_battery_soc') }}%. All control disabled."
+          message: "SOC: {{ states('sensor.sigen_0_plant_battery_soc') }}%. Safe state activated."
 
   - id: 'sigenergy_reset_low_battery_notified'
     alias: "Sigenergy — Reset Low Battery Notified"
@@ -1214,8 +1371,6 @@ automation:
     alias: "Sigenergy — Guard: Clamp Export Limit"
     mode: restart
     triggers:
-      - trigger: homeassistant
-        event: start
       - trigger: time_pattern
         minutes: "/5"
       - trigger: state
@@ -1234,35 +1389,6 @@ automation:
                   entity_id: number.sigen_0_plant_grid_max_export_limit
                 data:
                   value: "{{ max_allowed }}"
-
-  - id: 'sigenergy_ha_start_safe'
-    alias: "Sigenergy — HA Start: Safe State"
-    mode: single
-    triggers:
-      - trigger: homeassistant
-        event: start
-    actions:
-      - delay:
-          seconds: 30
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.sigenergy_master_enabled
-                state: "off"
-            sequence:
-              - action: script.turn_on
-                target:
-                  entity_id: script.sigenergy_force_safe_state
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.sigenergy_master_enabled
-                state: "on"
-            sequence:
-              - action: input_boolean.turn_off
-                target:
-                  entity_id: 
-                    - input_boolean.sigenergy_grid_charge_active
-                    - input_boolean.sigenergy_export_active
 
   # ===========================================================================
   # RESERVE MONITORING
