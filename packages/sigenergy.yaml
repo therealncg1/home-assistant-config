@@ -2,9 +2,16 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 3.6
+# Revision: 3.6.2
 # Last Updated: 2026-01-30
 # 
+# CHANGES IN 3.6.2:
+#   - Fixed PV utility meter source: sensor.sigen_0_lifetime_pv_energy
+#
+# CHANGES IN 3.6.1:
+#   - Fixed PV utility meter source sensor name
+#   - Added diagnostic comment for finding correct PV sensor
+#
 # CHANGES IN 3.6:
 #   - Added PROACTIVE STATE ENFORCEMENT automation (runs every 5 mins)
 #   - System now actively compares actual state vs desired state and corrects
@@ -435,7 +442,7 @@ utility_meter:
     cycle: daily
 
   sigenergy_daily_pv_yield:
-    source: sensor.sigen_0_pv_lifetime_production_energy
+    source: sensor.sigen_0_lifetime_pv_energy
     name: "Sigenergy — Daily PV Yield"
     cycle: daily
 
