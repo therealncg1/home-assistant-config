@@ -136,7 +136,7 @@ automation:
                 - light.kitchen_ceiling_light_rgb
             data:
               brightness_pct: 100
-              color_temp_kelvin: 6535
+              color_temp_kelvin: 5500
               transition: 3
     mode: single
     max_exceeded: silent

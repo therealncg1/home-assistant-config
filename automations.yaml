@@ -112,26 +112,6 @@
             position: 100
   mode: single
 
-- id: '1761650747661'
-  alias: Movie Time — Trigger (helper → script → auto-reset)
-  description: ''
-  triggers:
-    - entity_id:
-        - input_boolean.movie_time_scene_trigger
-      to: 'on'
-      trigger: state
-  conditions: []
-  actions:
-    - action: script.turn_on
-      target:
-        entity_id: script.scene_movie_time_kitchen_dining_ha
-    - delay:
-        seconds: 2
-    - action: input_boolean.turn_off
-      target:
-        entity_id: input_boolean.movie_time_scene_trigger
-  mode: single
-
 - id: '1768807954725'
   alias: Energy — Daily Amber delay + grid export summary (email)
   description: >-
