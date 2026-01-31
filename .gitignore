@@ -1,6 +1,9 @@
 # Backup files created by ha-sync.sh
 *.bak.*
 
+# ha-sync.sh
+ha-sync.sh
+
 # Secrets (if you have them)
 secrets.yaml
 
