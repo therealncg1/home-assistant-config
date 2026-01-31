@@ -2,12 +2,15 @@
 # =============================================================================
 # Home Assistant + Zigbee2MQTT Config Sync to TrueNAS
 # =============================================================================
-# Revision: 6.1
-# Updated: 2026-01-29
+# Revision: 6.2
+# Updated: 2026-01-31
 # 
 # Syncs:
 #   - HA config to /mnt/Apps/Home_Ass_data/
 #   - Z2M config to /mnt/.ix-apps/app_mounts/zigbee2mqtt/data/
+#
+# Changes in 6.2:
+#   - Added secrets.yaml to sync list (tokens moved from configuration.yaml)
 #
 # Fixes in 6.1:
 #   - Fixed macOS sed compatibility (BSD vs GNU)
@@ -38,6 +41,7 @@ LOCAL_HA_DIR="$SCRIPT_DIR"
 HA_FILES=(
     "automations.yaml"
     "configuration.yaml"
+    "secrets.yaml"
     "scripts.yaml"
     "packages/sigenergy.yaml"
     "packages/scene_switches.yaml"
