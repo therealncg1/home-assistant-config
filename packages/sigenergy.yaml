@@ -2,41 +2,56 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 3.6.2
-# Last Updated: 2026-01-30
-# 
+# Revision: 3.7
+# Last Updated: 2026-01-31
+#
+# CHANGES IN 3.7:
+#   - CRITICAL FIX: Export now uses Command Discharging mode instead of
+#     Maximum Self-consumption. In AC-coupled setups (SolarEdge + Sigenergy),
+#     Max Self-consumption only covers house load and never exports to grid.
+#   - Added dynamic discharge targeting: adjusts battery discharge rate
+#     every 30 seconds to maintain desired grid export despite varying
+#     house load (discharge = desired_export + house_load).
+#   - New template sensor: sigenergy_dynamic_discharge_target
+#   - New automation: sigenergy_dynamic_discharge_adjustment
+#   - Updated state mismatch sensor to check control mode
+#   - All safe-state/disable scripts now reset active power target and mode
+#
 # CHANGES IN 3.6.2:
 #   - Fixed PV utility meter source: sensor.sigen_0_lifetime_pv_energy
 #
-# CHANGES IN 3.6.1:
-#   - Fixed PV utility meter source sensor name
-#   - Added diagnostic comment for finding correct PV sensor
-#
 # CHANGES IN 3.6:
 #   - Added PROACTIVE STATE ENFORCEMENT automation (runs every 5 mins)
-#   - System now actively compares actual state vs desired state and corrects
 #   - Added Daily Summary email at midnight with proper energy totals
 #   - Added Utility Meter sensors for daily energy tracking
-#   - Improved notification triggers to handle steady-state scenarios
-#   - Added startup synchronization to set correct state immediately
-#   - Added system_log entries for debugging
 #   - Added State Mismatch sensor for easy diagnostics
 #
 # CHANGES IN 3.5:
 #   - CRITICAL FIX: Corrected switch logic after live testing
-#   - switch.turn_on = ENABLE Remote EMS (HA controls inverter)
-#   - switch.turn_off = DISABLE Remote EMS (local Self-Consumption)
 #
 # REMOTE EMS SWITCH BEHAVIOR (confirmed via testing):
 #   - switch.turn_on = Remote EMS ENABLED (HA controls inverter)
 #   - switch.turn_off = Remote EMS DISABLED (local Self-Consumption)
 #
-# OPERATING STRATEGY:
+# OPERATING STRATEGY (AC-COUPLED: SolarEdge + Sigenergy):
 #   - Always stay in Remote EMS mode (switch ON)
-#   - Export ON: Mode=Max Self-consumption, Export Limit=5kW
-#   - Export OFF: Mode=Max Self-consumption, Export Limit=0kW
-#   - Grid Charge: Mode=Command Charging, Export Limit=0kW
-#   - Battery still covers house load when export limit=0
+#   - Export ON:
+#       Mode = Command Discharging (Output power from the battery first)
+#       Active Power Target = dynamic (export_limit + house_load)
+#       Grid Export Limit = configured limit (e.g., 5 kW)
+#   - Export OFF:
+#       Mode = Maximum Self-consumption (Default)
+#       Active Power Target = 0
+#       Grid Export Limit = 0
+#   - Grid Charge:
+#       Mode = Command Charging (Consume power from the grid first)
+#       Grid Export Limit = 0
+#
+# KEY ENTITIES FOR EXPORT CONTROL:
+#   - select.sigen_0_plant_remote_ems_control_mode
+#   - number.sigen_0_plant_active_power_fixed_adjustment_target_value
+#   - number.sigen_0_plant_grid_max_export_limit
+#   - number.sigen_0_plant_max_discharging_limit (read-only, 10 kW)
 #
 # COLOR CODING:
 #   - Green (#137333 / #E6F4EA): I am exporting now!
@@ -491,6 +506,27 @@ template:
             0
           {% endif %}
 
+      - name: "Sigenergy — Dynamic Discharge Target"
+        unique_id: sigenergy_dynamic_discharge_target
+        unit_of_measurement: "kW"
+        icon: mdi:battery-arrow-down
+        state: >
+          {% set export_active = is_state('input_boolean.sigenergy_export_active', 'on') %}
+          {% if not export_active %}
+            0
+          {% else %}
+            {% set desired_export = states('input_number.sigenergy_export_limit_kw') | float(5) %}
+            {% set actual_export = states('sensor.sigen_0_grid_sensor_export_power') | float(0) / 1000 %}
+            {% set actual_import = states('sensor.sigen_0_grid_sensor_import_power') | float(0) / 1000 %}
+            {% set current_discharge = states('sensor.sigen_0_battery_discharging_power') | float(0) / 1000 %}
+            {% if current_discharge < 0.1 %}
+              {{ [desired_export + 3, 10] | min }}
+            {% else %}
+              {% set house_absorbed = [current_discharge - actual_export + actual_import, 0] | max %}
+              {{ [[desired_export + house_absorbed, 10] | min, desired_export] | max | round(1) }}
+            {% endif %}
+          {% endif %}
+
       - name: "Sigenergy — State Mismatch"
         unique_id: sigenergy_state_mismatch
         icon: mdi:alert-circle
@@ -501,10 +537,16 @@ template:
           {% set export_allowed = is_state('binary_sensor.sigenergy_export_allowed', 'on') %}
           {% set remote_ems_on = is_state('switch.sigen_0_plant_remote_ems', 'on') %}
           {% set master_on = is_state('input_boolean.sigenergy_master_enabled', 'on') %}
+          {% set current_mode = states('select.sigen_0_plant_remote_ems_control_mode') %}
+          {% set grid_charging = is_state('input_boolean.sigenergy_grid_charge_active', 'on') %}
           {% if not master_on %}
             No (master off)
           {% elif not remote_ems_on %}
             Yes (Remote EMS off)
+          {% elif export_active and 'Command Discharging' not in current_mode %}
+            Yes (wrong mode: {{ current_mode }})
+          {% elif not export_active and not grid_charging and 'Maximum Self-consumption' not in current_mode %}
+            Yes (wrong mode: {{ current_mode }})
           {% elif (current_limit | round(0)) != (desired_limit | round(0)) %}
             Yes (limit {{ current_limit | round(1) }} != {{ desired_limit | round(1) }})
           {% elif export_allowed and not export_active %}
@@ -586,6 +628,13 @@ script:
           entity_id: switch.sigen_0_plant_remote_ems
       - delay:
           seconds: 2
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: 0
+      - delay:
+          seconds: 1
       - action: select.select_option
         target:
           entity_id: select.sigen_0_plant_remote_ems_control_mode
@@ -620,13 +669,13 @@ script:
             - input_boolean.sigenergy_grid_charge_active
       - action: system_log.write
         data:
-          message: "Sigenergy: Remote EMS ensured active, defaults set"
+          message: "Sigenergy: Remote EMS ensured active, defaults set (Max Self-consumption, active power 0)"
           level: info
           logger: sigenergy.control
 
   sigenergy_enable_export:
     alias: "Sigenergy — Enable Export"
-    description: "Enable grid export (set limit to configured value)"
+    description: "Enable grid export via Command Discharging with dynamic discharge"
     icon: mdi:export
     mode: single
     sequence:
@@ -634,9 +683,9 @@ script:
         target:
           entity_id: select.sigen_0_plant_remote_ems_control_mode
         data:
-          option: "Maximum Self-consumption (Default)"
+          option: "Command Discharging (Output power from the battery first)"
       - delay:
-          seconds: 1
+          seconds: 2
       - action: number.set_value
         target:
           entity_id: number.sigen_0_plant_grid_max_export_limit
@@ -647,21 +696,39 @@ script:
           entity_id: number.sigen_0_plant_pcs_max_export_limit
         data:
           value: 4294967.295
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: "{{ [states('input_number.sigenergy_export_limit_kw') | float(5) + 3, 10] | min }}"
       - action: input_boolean.turn_on
         target:
           entity_id: input_boolean.sigenergy_export_active
       - action: system_log.write
         data:
-          message: "Sigenergy: Export ENABLED - Limit {{ states('input_number.sigenergy_export_limit_kw') }} kW, Price {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh"
+          message: >-
+            Sigenergy: Export ENABLED — Command Discharging mode,
+            Initial discharge {{ [states('input_number.sigenergy_export_limit_kw') | float(5) + 3, 10] | min }} kW,
+            Grid limit {{ states('input_number.sigenergy_export_limit_kw') }} kW,
+            Price {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh
           level: info
           logger: sigenergy.export
 
   sigenergy_disable_export:
     alias: "Sigenergy — Disable Export"
-    description: "Disable grid export (set limit to 0, battery still powers house)"
+    description: "Disable grid export (return to Max Self-consumption)"
     icon: mdi:export-variant
     mode: single
     sequence:
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: 0
+      - delay:
+          seconds: 1
       - action: select.select_option
         target:
           entity_id: select.sigen_0_plant_remote_ems_control_mode
@@ -684,7 +751,9 @@ script:
           entity_id: input_boolean.sigenergy_export_active
       - action: system_log.write
         data:
-          message: "Sigenergy: Export DISABLED - Price {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh"
+          message: >-
+            Sigenergy: Export DISABLED — Max Self-consumption mode,
+            Price {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh
           level: info
           logger: sigenergy.export
 
@@ -776,6 +845,13 @@ script:
           entity_id: 
             - input_boolean.sigenergy_grid_charge_active
             - input_boolean.sigenergy_export_active
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: 0
+      - delay:
+          seconds: 1
       - action: select.select_option
         target:
           entity_id: select.sigen_0_plant_remote_ems_control_mode
@@ -908,6 +984,54 @@ script:
               - action: system_log.write
                 data:
                   message: "Sigenergy: SYNC corrected export limit from {{ current_limit }} to {{ desired_limit }} kW"
+                  level: warning
+                  logger: sigenergy.sync
+      # Check control mode matches current state
+      - variables:
+          current_mode: "{{ states('select.sigen_0_plant_remote_ems_control_mode') }}"
+          export_on: "{{ is_state('input_boolean.sigenergy_export_active', 'on') }}"
+          charge_on: "{{ is_state('input_boolean.sigenergy_grid_charge_active', 'on') }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ export_on and 'Command Discharging' not in current_mode }}"
+            sequence:
+              - action: select.select_option
+                target:
+                  entity_id: select.sigen_0_plant_remote_ems_control_mode
+                data:
+                  option: "Command Discharging (Output power from the battery first)"
+              - delay:
+                  seconds: 2
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+                data:
+                  value: "{{ states('sensor.sigenergy_dynamic_discharge_target') | float(5) }}"
+              - action: system_log.write
+                data:
+                  message: "Sigenergy: SYNC corrected mode to Command Discharging (was {{ current_mode }})"
+                  level: warning
+                  logger: sigenergy.sync
+          - conditions:
+              - condition: template
+                value_template: "{{ not export_on and not charge_on and 'Maximum Self-consumption' not in current_mode }}"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+                data:
+                  value: 0
+              - delay:
+                  seconds: 1
+              - action: select.select_option
+                target:
+                  entity_id: select.sigen_0_plant_remote_ems_control_mode
+                data:
+                  option: "Maximum Self-consumption (Default)"
+              - action: system_log.write
+                data:
+                  message: "Sigenergy: SYNC corrected mode to Max Self-consumption (was {{ current_mode }})"
                   level: warning
                   logger: sigenergy.sync
 
@@ -1082,6 +1206,13 @@ script:
             **Grid Charge Active:** {{ states('input_boolean.sigenergy_grid_charge_active') }}
             **Export Allowed:** {{ states('binary_sensor.sigenergy_export_allowed') }}
             
+            === DYNAMIC DISCHARGE ===
+            **Active Power Target:** {{ states('number.sigen_0_plant_active_power_fixed_adjustment_target_value') }} kW
+            **Dynamic Target:** {{ states('sensor.sigenergy_dynamic_discharge_target') }} kW
+            **Battery Discharging:** {{ (states('sensor.sigen_0_battery_discharging_power') | float(0) / 1000) | round(2) }} kW
+            **Grid Export:** {{ (states('sensor.sigen_0_grid_sensor_export_power') | float(0) / 1000) | round(2) }} kW
+            **Grid Import:** {{ (states('sensor.sigen_0_grid_sensor_import_power') | float(0) / 1000) | round(2) }} kW
+            
             === STATE SYNC ===
             **Desired Export Limit:** {{ states('sensor.sigenergy_desired_export_limit') }} kW
             **Actual Export Limit:** {{ states('number.sigen_0_plant_grid_max_export_limit') }} kW
@@ -1135,6 +1266,44 @@ automation:
       - action: script.turn_on
         target:
           entity_id: script.sigenergy_synchronize_state
+
+  - id: 'sigenergy_dynamic_discharge_adjustment'
+    alias: "Sigenergy — Dynamic Discharge Adjustment"
+    description: "Adjust discharge target every 30s to maintain desired grid export"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        seconds: "/30"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_export_active
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+    actions:
+      - variables:
+          desired_target: "{{ states('sensor.sigenergy_dynamic_discharge_target') | float(5) }}"
+          current_target: "{{ states('number.sigen_0_plant_active_power_fixed_adjustment_target_value') | float(0) }}"
+          actual_export: "{{ (states('sensor.sigen_0_grid_sensor_export_power') | float(0) / 1000) | round(1) }}"
+          actual_import: "{{ (states('sensor.sigen_0_grid_sensor_import_power') | float(0) / 1000) | round(1) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ (desired_target - current_target) | abs > 0.4 }}"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+                data:
+                  value: "{{ desired_target }}"
+              - action: system_log.write
+                data:
+                  message: >-
+                    Sigenergy: Dynamic discharge {{ current_target }} → {{ desired_target }} kW
+                    (grid export: {{ actual_export }} kW, import: {{ actual_import }} kW)
+                  level: info
+                  logger: sigenergy.discharge
 
   - id: 'sigenergy_remote_ems_watchdog'
     alias: "Sigenergy — Remote EMS Watchdog"
