@@ -2,9 +2,9 @@
 # HOME ASSISTANT CONFIGURATION
 # =============================================================================
 # File: configuration.yaml
-# Revision: 2.0
-# Last Updated: 2026-01-28
-# Changes: Added packages directory for Sigenergy/Amber management
+# Revision: 2.2
+# Last Updated: 2026-01-31
+# Changes: Moved recorder db_url and all Hubitat API tokens to secrets.yaml
 # =============================================================================
 
 # ========== Core ==========
@@ -31,7 +31,7 @@ template: !include_dir_merge_list templates
 recorder:
   purge_keep_days: 365
   commit_interval: 3
-  db_url: postgresql://home-assistant:img2mem@192.168.1.200:5434/home-assistant?sslmode=disable
+  db_url: !secret recorder_db_url
 
 # ========== HTTP ==========
 http:
@@ -68,35 +68,33 @@ modbus:
 # ========== REST Commands ==========
 rest_command:
   # -------------------------------
-  # Hubitat Maker API (App ID 190) — token confirmed
+  # Hubitat Maker API (App 190)
+  # All URLs stored in secrets.yaml (tokens hidden)
   # -------------------------------
 
-  # Read device (debug/verification)
-  hubitat_read_device:
-    url: "http://192.168.1.20/apps/api/190/devices/{{ device_id }}?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+  hubitat_read_device: # debug/verification
+    url: !secret hubitat_api_device_url
     method: get
     timeout: 10
 
-  # Generic ON / OFF via POST JSON (keep for devices that accept it)
-  hubitat_on:
-    url: "http://192.168.1.20/apps/api/190/devices/{{ device_id }}?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+  hubitat_on: # generic ON via POST JSON
+    url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
     payload: >
       {"command":"on"}
     timeout: 10
 
-  hubitat_off:
-    url: "http://192.168.1.20/apps/api/190/devices/{{ device_id }}?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+  hubitat_off: # generic OFF via POST JSON
+    url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
     payload: >
       {"command":"off"}
     timeout: 10
 
-  # setLevel(level[, durationSeconds]) — JSON POST variant (handy elsewhere)
-  hubitat_set_level:
-    url: "http://192.168.1.20/apps/api/190/devices/{{ device_id }}?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+  hubitat_set_level: # setLevel(level[, durationSeconds])
+    url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
     payload: >
@@ -107,9 +105,8 @@ rest_command:
       {% endif %}
     timeout: 10
 
-  # setColorTemperature(kelvin[, level[, durationSeconds]])
-  hubitat_set_ct:
-    url: "http://192.168.1.20/apps/api/190/devices/{{ device_id }}?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+  hubitat_set_ct: # setColorTemperature(kelvin[, level[, durationSeconds]])
+    url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
     payload: >
@@ -122,9 +119,8 @@ rest_command:
       {% endif %}
     timeout: 10
 
-  # Garage momentary via App 190 (POST)
-  garage_close_now:
-    url: "http://192.168.1.20/apps/api/190/devices/118?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+  garage_close_now: # garage momentary (device 118)
+    url: !secret hubitat_garage_close_url
     method: post
     content_type: "application/json"
     payload: >
@@ -136,51 +132,51 @@ rest_command:
   # Main = device 147, Ring = device 148
   # -------------------------------
   hubitat_vsw_main_on:
-    url: "http://192.168.1.20/apps/api/190/devices/147/on?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+    url: !secret hubitat_vsw_main_on_url
     method: get
     timeout: 10
 
   hubitat_vsw_main_off:
-    url: "http://192.168.1.20/apps/api/190/devices/147/off?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+    url: !secret hubitat_vsw_main_off_url
     method: get
     timeout: 10
 
   hubitat_vsw_ring_on:
-    url: "http://192.168.1.20/apps/api/190/devices/148/on?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+    url: !secret hubitat_vsw_ring_on_url
     method: get
     timeout: 10
 
   hubitat_vsw_ring_off:
-    url: "http://192.168.1.20/apps/api/190/devices/148/off?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+    url: !secret hubitat_vsw_ring_off_url
     method: get
     timeout: 10
 
   # -------------------------------
-  # Hubitat Group OFF/ON (exact IDs)
-  # Kitchen Downlights — All = 149, Lounge Downlights — All = 121
+  # Hubitat Group OFF/ON
+  # Kitchen Downlights = 149, Lounge Downlights = 121
   # -------------------------------
-  hubitat_kitchen_downlights_off:
-    url: "http://192.168.1.20/apps/api/190/devices/149/off?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
-    method: get
-    timeout: 10
-  hubitat_lounge_downlights_off:
-    url: "http://192.168.1.20/apps/api/190/devices/121/off?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
-    method: get
-    timeout: 10
   hubitat_kitchen_downlights_on:
-    url: "http://192.168.1.20/apps/api/190/devices/149/on?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+    url: !secret hubitat_kitchen_dl_on_url
+    method: get
+    timeout: 10
+  hubitat_kitchen_downlights_off:
+    url: !secret hubitat_kitchen_dl_off_url
     method: get
     timeout: 10
   hubitat_lounge_downlights_on:
-    url: "http://192.168.1.20/apps/api/190/devices/121/on?access_token=bb4acea9-7060-4632-a2ba-b7c7e03763cf"
+    url: !secret hubitat_lounge_dl_on_url
+    method: get
+    timeout: 10
+  hubitat_lounge_downlights_off:
+    url: !secret hubitat_lounge_dl_off_url
     method: get
     timeout: 10
 
   # -------------------------------
-  # Local endpoint (Hubitat Rule Machine) to do native smooth fades
+  # Hubitat Rule Machine (App 192) — smooth fades
   # -------------------------------
   hubitat_movie_time_fade_downlights_endpoint:
-    url: "http://192.168.1.20/apps/api/192/trigger?access_token=57a370aa-faf7-4f97-9745-f650e83de9ff"
+    url: !secret hubitat_movie_fade_url
     method: get
     timeout: 10
 

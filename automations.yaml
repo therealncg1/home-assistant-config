@@ -2,11 +2,18 @@
 # HOME ASSISTANT AUTOMATIONS
 # =============================================================================
 # File: automations.yaml
-# Revision: 5.0
-# Last Updated: 2026-01-29
+# Revision: 6.0
+# Last Updated: 2026-01-31
 #
 # Kitchen and Dining automations are in: packages/scene_switches.yaml
 # Sigenergy/Amber automations are in: packages/sigenergy.yaml
+#
+# CHANGELOG (v6.0):
+#   - Removed "Energy — Daily Amber delay + grid export summary (email)"
+#     (id: 1768807954725). This UI-created automation referenced
+#     non-existent PostgreSQL/Riemann sensors and sent a broken 6:30 AM
+#     email. The midnight summary in packages/sigenergy.yaml handles
+#     daily reporting.
 # =============================================================================
 
 - id: '1757753649313'
@@ -42,7 +49,7 @@
   mode: single
 
 - id: '1757797917654'
-  alias: Garage – Driveway snapshot (webhook)
+  alias: "Garage \u2013 Driveway snapshot (webhook)"
   description: ''
   triggers:
     - trigger: webhook
@@ -63,7 +70,7 @@
   mode: single
 
 - id: '1758005044168'
-  alias: Mobile action → Close Garage
+  alias: "Mobile action \u2192 Close Garage"
   description: ''
   triggers:
     - event_type: ios.notification_action_fired
@@ -77,7 +84,7 @@
   mode: single
 
 - id: '1759040963334'
-  alias: Master Bedroom Switch → Toggle Blinds
+  alias: "Master Bedroom Switch \u2192 Toggle Blinds"
   description: ''
   triggers:
     - trigger: mqtt
@@ -110,68 +117,4 @@
               - cover.master_bedroom_right_blind
           data:
             position: 100
-  mode: single
-
-- id: '1768807954725'
-  alias: Energy — Daily Amber delay + grid export summary (email)
-  description: >-
-    Daily email (yesterday, local time) listing every Amber interval
-    (feed-in + import) with effective vs HA-received time + delay,
-    plus Sigenergy RM bucket sums + deltas.
-  triggers:
-    - trigger: time
-      at: '06:30:00'
-  conditions: []
-  actions:
-    - action: notify.email_glenn_energy_summary
-      data:
-        title: 'Amber + Sigenergy Daily Summary — {{ now().strftime(''%A %d %B %Y'') }}'
-        message: |
-          {% set yesterday = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
-          
-          == AMBER FEED-IN INTERVALS ({{ yesterday }}) ==
-          
-          {% set ns = namespace(rows=[]) %}
-          {% set query_fit = "
-            SELECT
-              to_char(effective_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI') AS eff,
-              to_char(ha_received_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI:SS') AS rcv,
-              EXTRACT(EPOCH FROM (ha_received_at - effective_at))::int AS delay_s,
-              ROUND(price_kwh::numeric, 2) AS price
-            FROM amber_prices
-            WHERE interval_type = 'FeedIn'
-              AND DATE(effective_at AT TIME ZONE 'Australia/Melbourne') = '" ~ yesterday ~ "'
-            ORDER BY effective_at
-          " %}
-          {% set result_fit = state_attr('sensor.pg_amber_feed_in_intervals', 'query_result') or [] %}
-          {% for r in result_fit %}
-          {{ r.eff }} | rcv {{ r.rcv }} | delay {{ r.delay_s }}s | {{ r.price }} c/kWh
-          {% endfor %}
-          
-          == AMBER IMPORT INTERVALS ({{ yesterday }}) ==
-          
-          {% set query_imp = "
-            SELECT
-              to_char(effective_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI') AS eff,
-              to_char(ha_received_at AT TIME ZONE 'Australia/Melbourne', 'HH24:MI:SS') AS rcv,
-              EXTRACT(EPOCH FROM (ha_received_at - effective_at))::int AS delay_s,
-              ROUND(price_kwh::numeric, 2) AS price
-            FROM amber_prices
-            WHERE interval_type = 'Import'
-              AND DATE(effective_at AT TIME ZONE 'Australia/Melbourne') = '" ~ yesterday ~ "'
-            ORDER BY effective_at
-          " %}
-          {% set result_imp = state_attr('sensor.pg_amber_import_intervals', 'query_result') or [] %}
-          {% for r in result_imp %}
-          {{ r.eff }} | rcv {{ r.rcv }} | delay {{ r.delay_s }}s | {{ r.price }} c/kWh
-          {% endfor %}
-          
-          == SIGENERGY RIEMANN SUM BUCKETS ==
-          
-          Grid Export:  {{ states('sensor.sigen_0_grid_sensor_export_energy_sum') }} kWh
-          Grid Import:  {{ states('sensor.sigen_0_grid_sensor_import_energy_sum') }} kWh
-          Battery Chg:  {{ states('sensor.sigen_0_battery_charging_energy_sum') }} kWh
-          Battery Dis:  {{ states('sensor.sigen_0_battery_discharging_energy_sum') }} kWh
-          PV Yield:     {{ states('sensor.sigen_0_pv_total_yield_energy_sum') }} kWh
-          Consumed:     {{ states('sensor.sigen_0_consumed_energy_sum') }} kWh
   mode: single
