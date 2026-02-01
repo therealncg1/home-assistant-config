@@ -2,8 +2,15 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 3.7
-# Last Updated: 2026-01-31
+# Revision: 3.8
+# Last Updated: 2026-02-01
+#
+#
+# CHANGES IN 3.8:
+#   - Enhanced daily email with export earnings, min/max SOC, SolarEdge cross-check
+#   - New input_numbers for daily tracking metrics
+#   - New automations: Track SOC Min/Max, Track Export Earnings, Reset Daily Trackers
+#   - SolarEdge sensors: solaredge_i1_m1_ac_energy_exported/imported
 #
 # CHANGES IN 3.7:
 #   - CRITICAL FIX: Export now uses Command Discharging mode instead of
@@ -424,6 +431,89 @@ input_number:
     min: 0
     max: 9999999
     step: 0.001
+    mode: box
+
+
+  # --- DAILY TRACKING (v3.8) ---
+  sigenergy_daily_min_soc:
+    name: "Sigenergy — Daily Min SOC"
+    icon: mdi:battery-low
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+    mode: box
+
+  sigenergy_daily_max_soc:
+    name: "Sigenergy — Daily Max SOC"
+    icon: mdi:battery-high
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+    mode: box
+
+  sigenergy_daily_export_earnings:
+    name: "Sigenergy — Daily Export Earnings"
+    icon: mdi:cash-plus
+    min: -100
+    max: 1000
+    step: 0.001
+    unit_of_measurement: "$"
+    mode: box
+
+  sigenergy_daily_export_missing_price:
+    name: "Sigenergy — Daily Export Missing Price kWh"
+    icon: mdi:alert-circle
+    min: -100
+    max: 1000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_prev_lifetime_export:
+    name: "Sigenergy — Previous Lifetime Export"
+    icon: mdi:counter
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_se_start_of_day_export:
+    name: "Sigenergy — SolarEdge Start of Day Export"
+    icon: mdi:solar-power
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_se_start_of_day_import:
+    name: "Sigenergy — SolarEdge Start of Day Import"
+    icon: mdi:transmission-tower-import
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_sigen_start_of_day_export:
+    name: "Sigenergy — Sigen Start of Day Export"
+    icon: mdi:battery-arrow-up
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_sigen_start_of_day_import:
+    name: "Sigenergy — Sigen Start of Day Import"
+    icon: mdi:battery-arrow-down
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
     mode: box
 
 input_datetime:
@@ -1586,9 +1676,151 @@ automation:
           data:
             html: "<html><body style='margin:0;padding:0;background:#fff;'><div style='max-width:600px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'><div style='border:1px solid #dadce0;border-left:6px solid {{ accent_color }};border-radius:12px;overflow:hidden;margin:12px 0;'><div style='background:{{ bg_color }};padding:10px 12px;font-weight:700;'>{{ action_title }}</div><div style='padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.5;color:#111;'>Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.<br>Import price changed from {{ import_prev }} to {{ import_now }} c/kWh for interval starting {{ interval_start_local }}.<br>Grid-charge recommendation switched OFF (threshold 0 c/kWh).<br>Current battery state of charge: {{ soc }}%<br>Home Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s).</div></div></div></body></html>"
 
+
+  # --- v3.8: Daily Tracking Automations ---
+  - id: 'sigenergy_track_daily_soc_minmax'
+    alias: "Sigenergy — Track Daily SOC Min/Max"
+    description: "Update daily min/max SOC every 5 minutes"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.sigen_0_plant_battery_soc') not in ['unknown','unavailable','none'] }}"
+    actions:
+      - variables:
+          current_soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(50) }}"
+          current_min: "{{ states('input_number.sigenergy_daily_min_soc') | float(100) }}"
+          current_max: "{{ states('input_number.sigenergy_daily_max_soc') | float(0) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ current_soc < current_min }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_min_soc
+                data:
+                  value: "{{ current_soc }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ current_soc > current_max }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_max_soc
+                data:
+                  value: "{{ current_soc }}"
+
+  - id: 'sigenergy_track_export_earnings'
+    alias: "Sigenergy — Track Export Earnings"
+    description: "Accumulate export earnings every 5 minutes based on export delta and feed-in price"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') not in ['unknown','unavailable','none'] }}"
+    actions:
+      - variables:
+          current_export: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          prev_export: "{{ states('input_number.sigenergy_prev_lifetime_export') | float(0) }}"
+          feed_in_price: "{{ states('sensor.glenn_home_feed_in_price') | float(-999) }}"
+          export_delta: "{{ [(current_export - prev_export), 0] | max }}"
+          price_valid: "{{ feed_in_price != -999 and states('sensor.glenn_home_feed_in_price') not in ['unknown','unavailable','none',''] }}"
+          current_earnings: "{{ states('input_number.sigenergy_daily_export_earnings') | float(0) }}"
+          current_missing: "{{ states('input_number.sigenergy_daily_export_missing_price') | float(0) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ export_delta > 0 and price_valid }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_export_earnings
+                data:
+                  value: "{{ (current_earnings + (export_delta * feed_in_price)) | round(3) }}"
+          - conditions:
+              - condition: template
+                value_template: "{{ export_delta > 0 and not price_valid }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_export_missing_price
+                data:
+                  value: "{{ (current_missing + export_delta) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_lifetime_export
+        data:
+          value: "{{ current_export }}"
+
+  - id: 'sigenergy_reset_daily_trackers'
+    alias: "Sigenergy — Reset Daily Trackers at Midnight"
+    description: "Reset min/max SOC, earnings, and capture start-of-day values"
+    mode: single
+    triggers:
+      - trigger: time
+        at: "00:00:05"
+    actions:
+      - variables:
+          current_soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(50) }}"
+          se_export: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+          se_import: "{{ states('sensor.solaredge_i1_m1_ac_energy_imported') | float(0) }}"
+          sigen_export: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          sigen_import: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_min_soc
+        data:
+          value: "{{ current_soc }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_max_soc
+        data:
+          value: "{{ current_soc }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_export_earnings
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_export_missing_price
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_lifetime_export
+        data:
+          value: "{{ sigen_export }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_se_start_of_day_export
+        data:
+          value: "{{ se_export }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_se_start_of_day_import
+        data:
+          value: "{{ se_import }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_sigen_start_of_day_export
+        data:
+          value: "{{ sigen_export }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_sigen_start_of_day_import
+        data:
+          value: "{{ sigen_import }}"
+
   - id: 'sigenergy_daily_summary_email'
     alias: "Sigenergy — Daily Summary Email"
-    description: "Send daily energy summary at midnight"
+    description: "Send comprehensive daily energy summary at midnight"
     mode: single
     triggers:
       - trigger: time
@@ -1596,6 +1828,7 @@ automation:
     actions:
       - variables:
           yesterday: "{{ (now() - timedelta(days=1)).strftime('%Y-%m-%d') }}"
+          yesterday_display: "{{ (now() - timedelta(days=1)).strftime('%d/%m/%Y') }}"
           grid_export: "{{ states('sensor.sigenergy_daily_grid_export') | float(0) | round(2) }}"
           grid_import: "{{ states('sensor.sigenergy_daily_grid_import') | float(0) | round(2) }}"
           battery_charge: "{{ states('sensor.sigenergy_daily_battery_charge') | float(0) | round(2) }}"
@@ -1603,47 +1836,104 @@ automation:
           pv_yield: "{{ states('sensor.sigenergy_daily_pv_yield') | float(0) | round(2) }}"
           consumption: "{{ states('sensor.sigenergy_daily_consumption') | float(0) | round(2) }}"
           soc_now: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
+          soc_min: "{{ states('input_number.sigenergy_daily_min_soc') | float(0) | round(1) }}"
+          soc_max: "{{ states('input_number.sigenergy_daily_max_soc') | float(0) | round(1) }}"
+          export_earnings: "{{ states('input_number.sigenergy_daily_export_earnings') | float(0) | round(2) }}"
+          export_missing: "{{ states('input_number.sigenergy_daily_export_missing_price') | float(0) | round(2) }}"
+          net_grid: "{{ (grid_export - grid_import) | round(2) }}"
+          net_grid_label: "{% if (grid_export - grid_import) >= 0 %}net export{% else %}net import{% endif %}"
+          se_export_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+          se_import_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_imported') | float(0) }}"
+          se_export_start: "{{ states('input_number.sigenergy_se_start_of_day_export') | float(0) }}"
+          se_import_start: "{{ states('input_number.sigenergy_se_start_of_day_import') | float(0) }}"
+          sigen_export_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          sigen_import_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
+          sigen_export_start: "{{ states('input_number.sigenergy_sigen_start_of_day_export') | float(0) }}"
+          sigen_import_start: "{{ states('input_number.sigenergy_sigen_start_of_day_import') | float(0) }}"
+          se_daily_export: "{{ (se_export_now - se_export_start) | round(2) }}"
+          se_daily_import: "{{ (se_import_now - se_import_start) | round(2) }}"
+          sigen_daily_export: "{{ (sigen_export_now - sigen_export_start) | round(2) }}"
+          sigen_daily_import: "{{ (sigen_import_now - sigen_import_start) | round(2) }}"
+          threshold_c: "{{ (states('input_number.sigenergy_export_threshold') | float(0.033) * 100) | round(1) }}"
       - action: notify.email_glenn_energy_summary
         data:
-          title: "Sigenergy Daily Summary for {{ yesterday }}"
+          title: "Daily energy summary — {{ yesterday_display }}"
           message: |
-            SIGENERGY DAILY SUMMARY ({{ yesterday }})
-            
-            == ENERGY FLOWS ==
-            PV Yield:          {{ pv_yield }} kWh
-            Grid Export:       {{ grid_export }} kWh
-            Grid Import:       {{ grid_import }} kWh
-            House Consumption: {{ consumption }} kWh
-            Battery Charge:    {{ battery_charge }} kWh
-            Battery Discharge: {{ battery_discharge }} kWh
-            
-            == CURRENT STATUS ==
-            Battery SOC:       {{ soc_now }}%
-            
-            == CALCULATED ==
-            Net Grid:          {{ (grid_export - grid_import) | round(2) }} kWh (positive = net export)
+            DAILY ENERGY SUMMARY — {{ yesterday_display }}
+
+            == EXPORT EARNINGS SUMMARY (yesterday) ==
+            Exported (Sigenergy RM): {{ grid_export }} kWh
+            Estimated earnings (× Amber feed-in): ${{ export_earnings }}
+            Export missing price (excluded from $): {{ export_missing }} kWh
+
+            == SIGENERGY RM (bucket sums) ==
+            Grid export: {{ grid_export }} kWh
+            Grid import: {{ grid_import }} kWh
+            House consumption: {{ consumption }} kWh
+            Battery charge: {{ battery_charge }} kWh
+            Battery discharge: {{ battery_discharge }} kWh
+            SoC min/max: {{ soc_min }}% / {{ soc_max }}%
+
+            == CROSS-CHECK (delta within the day window) ==
+            SolarEdge energy exported: {{ se_daily_export }} kWh
+            SolarEdge energy imported: {{ se_daily_import }} kWh
+            Sigenergy lifetime export delta: {{ sigen_daily_export }} kWh
+            Sigenergy lifetime import delta: {{ sigen_daily_import }} kWh
+
+            == SUMMARY ==
+            Net Grid: {{ net_grid }} kWh ({{ net_grid_label }})
+            Battery SOC now: {{ soc_now }}%
           data:
-            html: >
+            html: |
               <html><body style='margin:0;padding:0;background:#fff;'>
-              <div style='max-width:600px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'>
-              <h2 style='color:#1a73e8;margin-bottom:16px;'>Sigenergy Daily Summary</h2>
-              <p style='color:#666;margin-bottom:16px;'>{{ yesterday }}</p>
-              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:12px 0;'>
-              <div style='background:#E8F0FE;padding:10px 12px;font-weight:700;'>Energy Flows</div>
-              <div style='padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.8;'>
-              ☀️ PV Yield: <strong>{{ pv_yield }} kWh</strong><br>
-              📤 Grid Export: <strong>{{ grid_export }} kWh</strong><br>
-              📥 Grid Import: <strong>{{ grid_import }} kWh</strong><br>
-              🏠 Consumption: <strong>{{ consumption }} kWh</strong><br>
-              🔋 Battery Charge: <strong>{{ battery_charge }} kWh</strong><br>
-              🔋 Battery Discharge: <strong>{{ battery_discharge }} kWh</strong>
+              <div style='max-width:700px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'>
+              
+              <h2 style='color:#1a73e8;margin-bottom:4px;'>Daily energy summary — {{ yesterday_display }}</h2>
+              <p style='color:#666;margin-top:0;margin-bottom:20px;'>Date (local): <strong>{{ yesterday_display }}</strong></p>
+              
+              <!-- Export Earnings Summary -->
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:16px 0;'>
+              <div style='background:#fff;padding:12px 16px;font-weight:700;font-size:15px;border-bottom:1px solid #dadce0;'>Export earnings summary (yesterday)</div>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;color:#111;'>
+              Exported (Sigenergy RM): <strong>{{ grid_export }}</strong> kWh<br>
+              Estimated earnings (× Amber feed-in): <strong>${{ export_earnings }}</strong><br>
+              Export missing price (excluded from $): <strong>{{ export_missing }}</strong> kWh<br>
+              <br>
+              <span style='color:#666;font-size:12px;'>Note: earnings uses accumulated feed-in price × export delta every 5 minutes.</span>
               </div></div>
-              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:12px 0;'>
-              <div style='background:#E6F4EA;padding:10px 12px;font-weight:700;'>Summary</div>
-              <div style='padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.8;'>
-              Net Grid: <strong>{{ (grid_export - grid_import) | round(2) }} kWh</strong> ({% if (grid_export - grid_import) > 0 %}net export ✓{% else %}net import{% endif %})<br>
+              
+              <!-- Sigenergy RM (bucket sums) -->
+              <h3 style='color:#333;margin:24px 0 8px 0;font-size:16px;font-weight:600;'>Sigenergy RM (bucket sums)</h3>
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:0 0 16px 0;'>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;color:#111;'>
+              Grid export: <strong>{{ grid_export }}</strong> kWh<br>
+              Grid import: <strong>{{ grid_import }}</strong> kWh<br>
+              House consumption: <strong>{{ consumption }}</strong> kWh<br>
+              Battery charge: <strong>{{ battery_charge }}</strong> kWh<br>
+              Battery discharge: <strong>{{ battery_discharge }}</strong> kWh<br>
+              SoC min/max: <strong>{{ soc_min }}%</strong> / <strong>{{ soc_max }}%</strong>
+              </div></div>
+              
+              <!-- Cross-check -->
+              <h3 style='color:#333;margin:24px 0 8px 0;font-size:16px;font-weight:600;'>Cross-check (delta within the day window)</h3>
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:0 0 16px 0;'>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;color:#111;'>
+              SolarEdge energy exported: <strong>{{ se_daily_export }}</strong> kWh<br>
+              SolarEdge energy imported: <strong>{{ se_daily_import }}</strong> kWh<br>
+              Sigenergy lifetime export delta: <strong>{{ sigen_daily_export }}</strong> kWh<br>
+              Sigenergy lifetime import delta: <strong>{{ sigen_daily_import }}</strong> kWh
+              </div></div>
+              
+              <!-- Summary -->
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:16px 0;'>
+              <div style='background:#E6F4EA;padding:10px 16px;font-weight:700;'>Summary</div>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;'>
+              Net Grid: <strong>{{ net_grid }} kWh</strong> ({{ net_grid_label }})<br>
               Battery SOC now: <strong>{{ soc_now }}%</strong>
               </div></div>
+              
+              <p style='color:#888;font-size:11px;margin-top:20px;'>Decision banners appear ONLY when crossing thresholds (export > {{ threshold_c }} c/kWh, grid-charge ≤ 0 c/kWh). This report describes energy flows for the completed day.</p>
+              
               </div></body></html>
 
   - id: 'sigenergy_master_off_safe_state'
