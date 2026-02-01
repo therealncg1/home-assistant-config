@@ -2,9 +2,12 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 3.8
-# Last Updated: 2026-02-01
+# Revision: 3.8.1
+# Last Updated: 2026-02-01 (evening)
 #
+#
+# CHANGES IN 3.8.1:
+#   - Added startup automation to default Master switch to ON after HA restart
 #
 # CHANGES IN 3.8:
 #   - Enhanced daily email with export earnings, min/max SOC, SolarEdge cross-check
@@ -1322,6 +1325,29 @@ script:
 # AUTOMATIONS
 # =============================================================================
 automation:
+
+  # --- v3.8.1: Default Master ON at startup ---
+  - id: 'sigenergy_master_default_on_startup'
+    alias: "Sigenergy — Master Default ON at Startup"
+    description: "Ensure master switch defaults to ON after HA restart"
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+    actions:
+      - delay:
+          seconds: 30
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "off"
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.sigenergy_master_enabled
+      - action: system_log.write
+        data:
+          message: "Sigenergy: Master switch was OFF after startup — automatically enabled"
+          level: warning
+          logger: sigenergy.startup
   - id: 'sigenergy_ha_start_ensure_remote_ems'
     alias: "Sigenergy — HA Start: Ensure Remote EMS"
     description: "On HA start, ensure Remote EMS is active and synchronize state"
