@@ -2,12 +2,15 @@
 # =============================================================================
 # Home Assistant + Zigbee2MQTT Config Sync to TrueNAS
 # =============================================================================
-# Revision: 6.2
-# Updated: 2026-01-31
+# Revision: 6.3
+# Updated: 2026-02-01
 # 
 # Syncs:
 #   - HA config to /mnt/Apps/Home_Ass_data/
 #   - Z2M config to /mnt/.ix-apps/app_mounts/zigbee2mqtt/data/
+#
+# Changes in 6.3:
+#   - Auto-prunes old backups, keeping only 2 most recent per file
 #
 # Changes in 6.2:
 #   - Added secrets.yaml to sync list (tokens moved from configuration.yaml)
@@ -224,6 +227,43 @@ if [[ -n "$Z2M_FILE_LIST" ]]; then
         chown $Z2M_OWNER "$REMOTE_FILE"
         
         echo "   ✓ $REMOTE_FILE (owner: $Z2M_OWNER)"
+    done
+fi
+
+# =========================================================================
+# PRUNE OLD BACKUPS (keep only 2 most recent per file)
+# =========================================================================
+echo ""
+echo "🧹 Pruning old backups (keeping 2 most recent)..."
+
+if [[ -n "$HA_FILE_LIST" ]]; then
+    cd "$HA_REMOTE_DIR"
+    for f in $HA_FILE_LIST; do
+        # Find all backups for this file, sorted newest first
+        BACKUPS=($(ls -t "${f}.bak."* 2>/dev/null || true))
+        if [[ ${#BACKUPS[@]} -gt 2 ]]; then
+            # Delete all but the first 2 (newest)
+            for ((i=2; i<${#BACKUPS[@]}; i++)); do
+                rm -f "${BACKUPS[$i]}"
+            done
+            DELETED=$((${#BACKUPS[@]} - 2))
+            echo "   🗑️  $f: removed $DELETED old backup(s), kept 2"
+        fi
+    done
+fi
+
+if [[ -n "$Z2M_FILE_LIST" ]]; then
+    cd "$Z2M_REMOTE_DIR"
+    for f in $Z2M_FILE_LIST; do
+        REMOTE_FILE="${f#zigbee2mqtt/}"
+        BACKUPS=($(ls -t "${REMOTE_FILE}.bak."* 2>/dev/null || true))
+        if [[ ${#BACKUPS[@]} -gt 2 ]]; then
+            for ((i=2; i<${#BACKUPS[@]}; i++)); do
+                rm -f "${BACKUPS[$i]}"
+            done
+            DELETED=$((${#BACKUPS[@]} - 2))
+            echo "   🗑️  $REMOTE_FILE: removed $DELETED old backup(s), kept 2"
+        fi
     done
 fi
 
