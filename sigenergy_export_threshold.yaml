@@ -1,0 +1,15 @@
+- binary_sensor:
+  - name: Sigenergy — Feed-in above export threshold
+    unique_id: sigenergy_feed_in_above_export_threshold
+    state: '{% set p = states(''sensor.glenn_home_feed_in_price'') %}
+
+      {% set t = states(''input_number.sigenergy_export_threshold'') %}
+
+      {{ p not in [''unknown'',''unavailable'',''''] and t not in [''unknown'',''unavailable'',''''] and (p|float(0)) >= (t|float(0)) }}'
+    availability: '{{ states(''sensor.glenn_home_feed_in_price'') not in [''unknown'',''unavailable'',''''] and states(''input_number.sigenergy_export_threshold'') not in [''unknown'',''unavailable'',''''] }}'
+    attributes:
+      feed_in_dollars_per_kwh: '{{ states(''sensor.glenn_home_feed_in_price'') }}'
+      threshold_dollars_per_kwh: '{{ states(''input_number.sigenergy_export_threshold'') }}'
+      feed_in_cents_per_kwh: '{{ (states(''sensor.glenn_home_feed_in_price'')|float(0)*100)|round(3) }}'
+      threshold_cents_per_kwh: '{{ (states(''input_number.sigenergy_export_threshold'')|float(0)*100)|round(3) }}'
+      effective_start_time: '{{ state_attr(''sensor.glenn_home_feed_in_price'',''start_time'') }}'

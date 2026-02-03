@@ -1,0 +1,2544 @@
+# =============================================================================
+# SIGENERGY ENERGY MANAGEMENT PACKAGE
+# =============================================================================
+# File: packages/sigenergy.yaml
+# Revision: 3.8.3
+# Last Updated: 2026-02-02 (v3.8.3)
+#
+#
+# CHANGES IN 3.8.3:
+#   - Monthly earnings tracking using SolarEdge grid meter (authoritative)
+#   - New monthly tracking helpers and reset automation
+#   - Updated notifications and daily email with monthly estimate
+#   - Average price calculation: total earnings / total kWh
+#
+# CHANGES IN 3.8.2:
+#   - Enhanced startup recovery: detects and fixes reset values for threshold,
+#     export limit, and SOC schedule after crash/restore
+#   - Added initial: values to critical input_numbers as fallback
+#
+# CHANGES IN 3.8.1:
+#   - Added startup automation to default Master switch to ON after HA restart
+#
+# CHANGES IN 3.8:
+#   - Enhanced daily email with export earnings, min/max SOC, SolarEdge cross-check
+#   - New input_numbers for daily tracking metrics
+#   - New automations: Track SOC Min/Max, Track Export Earnings, Reset Daily Trackers
+#   - SolarEdge sensors: solaredge_i1_m1_ac_energy_exported/imported
+#
+# CHANGES IN 3.7:
+#   - CRITICAL FIX: Export now uses Command Discharging mode instead of
+#     Maximum Self-consumption. In AC-coupled setups (SolarEdge + Sigenergy),
+#     Max Self-consumption only covers house load and never exports to grid.
+#   - Added dynamic discharge targeting: adjusts battery discharge rate
+#     every 30 seconds to maintain desired grid export despite varying
+#     house load (discharge = desired_export + house_load).
+#   - New template sensor: sigenergy_dynamic_discharge_target
+#   - New automation: sigenergy_dynamic_discharge_adjustment
+#   - Updated state mismatch sensor to check control mode
+#   - All safe-state/disable scripts now reset active power target and mode
+#
+# CHANGES IN 3.6.2:
+#   - Fixed PV utility meter source: sensor.sigen_0_lifetime_pv_energy
+#
+# CHANGES IN 3.6:
+#   - Added PROACTIVE STATE ENFORCEMENT automation (runs every 5 mins)
+#   - Added Daily Summary email at midnight with proper energy totals
+#   - Added Utility Meter sensors for daily energy tracking
+#   - Added State Mismatch sensor for easy diagnostics
+#
+# CHANGES IN 3.5:
+#   - CRITICAL FIX: Corrected switch logic after live testing
+#
+# REMOTE EMS SWITCH BEHAVIOR (confirmed via testing):
+#   - switch.turn_on = Remote EMS ENABLED (HA controls inverter)
+#   - switch.turn_off = Remote EMS DISABLED (local Self-Consumption)
+#
+# OPERATING STRATEGY (AC-COUPLED: SolarEdge + Sigenergy):
+#   - Always stay in Remote EMS mode (switch ON)
+#   - Export ON:
+#       Mode = Command Discharging (Output power from the battery first)
+#       Active Power Target = dynamic (export_limit + house_load)
+#       Grid Export Limit = configured limit (e.g., 5 kW)
+#   - Export OFF:
+#       Mode = Maximum Self-consumption (Default)
+#       Active Power Target = 0
+#       Grid Export Limit = 0
+#   - Grid Charge:
+#       Mode = Command Charging (Consume power from the grid first)
+#       Grid Export Limit = 0
+#
+# KEY ENTITIES FOR EXPORT CONTROL:
+#   - select.sigen_0_plant_remote_ems_control_mode
+#   - number.sigen_0_plant_active_power_fixed_adjustment_target_value
+#   - number.sigen_0_plant_grid_max_export_limit
+#   - number.sigen_0_plant_max_discharging_limit (read-only, 10 kW)
+#
+# COLOR CODING:
+#   - Green (#137333 / #E6F4EA): I am exporting now!
+#   - Red (#D93025 / #FCE8E6): I have stopped exporting!
+#   - Orange (#E37400 / #FFF4E5): I am charging the battery!
+#   - Blue (#1A73E8 / #E8F0FE): I have stopped charging the battery!
+# =============================================================================
+
+# =============================================================================
+# INPUT BOOLEANS
+# =============================================================================
+input_boolean:
+  sigenergy_master_enabled:
+    name: "Sigenergy — Master Enabled"
+    icon: mdi:power
+
+  sigenergy_grid_charge_active:
+    name: "Sigenergy — Grid Charge Active"
+    icon: mdi:battery-charging
+
+  sigenergy_export_active:
+    name: "Sigenergy — Export Active"
+    icon: mdi:export
+
+  sigenergy_low_battery_notified:
+    name: "Sigenergy — Low Battery Notified (15%)"
+    icon: mdi:bell-off
+
+  sigenergy_critical_battery_notified:
+    name: "Sigenergy — Critical Battery Notified (5%)"
+    icon: mdi:bell-off
+
+# =============================================================================
+# INPUT NUMBERS
+# =============================================================================
+input_number:
+  sigenergy_export_threshold:
+    name: "Sigenergy — Export Threshold ($/kWh)"
+    icon: mdi:cash
+    min: 0
+    max: 1
+    step: 0.001
+    unit_of_measurement: "$/kWh"
+    mode: box
+    initial: 0.033
+
+  sigenergy_export_limit_kw:
+    name: "Sigenergy — Export Limit (kW)"
+    icon: mdi:transmission-tower-export
+    min: 0
+    max: 10
+    step: 0.5
+    unit_of_measurement: "kW"
+    mode: box
+    initial: 5
+
+  sigenergy_prev_feed_in_price:
+    name: "Sigenergy — Previous Feed-in Price (c/kWh)"
+    icon: mdi:cash-clock
+    min: -100
+    max: 500
+    step: 0.01
+    unit_of_measurement: "c/kWh"
+    mode: box
+
+  sigenergy_prev_import_price:
+    name: "Sigenergy — Previous Import Price (c/kWh)"
+    icon: mdi:cash-clock
+    min: -100
+    max: 500
+    step: 0.01
+    unit_of_measurement: "c/kWh"
+    mode: box
+
+  # HOURLY SOC MINIMUMS
+  sigenergy_min_soc_hour_00:
+    name: "Sigenergy — Min SOC 00:00"
+    icon: mdi:battery-20
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 25
+
+  sigenergy_min_soc_hour_01:
+    name: "Sigenergy — Min SOC 01:00"
+    icon: mdi:battery-20
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 25
+
+  sigenergy_min_soc_hour_02:
+    name: "Sigenergy — Min SOC 02:00"
+    icon: mdi:battery-10
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 20
+
+  sigenergy_min_soc_hour_03:
+    name: "Sigenergy — Min SOC 03:00"
+    icon: mdi:battery-10
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 20
+
+  sigenergy_min_soc_hour_04:
+    name: "Sigenergy — Min SOC 04:00"
+    icon: mdi:battery-10
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 15
+
+  sigenergy_min_soc_hour_05:
+    name: "Sigenergy — Min SOC 05:00"
+    icon: mdi:battery-10
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 15
+
+  sigenergy_min_soc_hour_06:
+    name: "Sigenergy — Min SOC 06:00"
+    icon: mdi:battery-10
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 10
+
+  sigenergy_min_soc_hour_07:
+    name: "Sigenergy — Min SOC 07:00"
+    icon: mdi:battery-10
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 10
+
+  sigenergy_min_soc_hour_08:
+    name: "Sigenergy — Min SOC 08:00"
+    icon: mdi:battery-20
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 10
+
+  sigenergy_min_soc_hour_09:
+    name: "Sigenergy — Min SOC 09:00"
+    icon: mdi:battery-20
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 10
+
+  sigenergy_min_soc_hour_10:
+    name: "Sigenergy — Min SOC 10:00"
+    icon: mdi:battery-20
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 10
+
+  sigenergy_min_soc_hour_11:
+    name: "Sigenergy — Min SOC 11:00"
+    icon: mdi:battery-20
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 20
+
+  sigenergy_min_soc_hour_12:
+    name: "Sigenergy — Min SOC 12:00"
+    icon: mdi:battery-20
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 25
+
+  sigenergy_min_soc_hour_13:
+    name: "Sigenergy — Min SOC 13:00"
+    icon: mdi:battery-30
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 30
+
+  sigenergy_min_soc_hour_14:
+    name: "Sigenergy — Min SOC 14:00"
+    icon: mdi:battery-30
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 35
+
+  sigenergy_min_soc_hour_15:
+    name: "Sigenergy — Min SOC 15:00"
+    icon: mdi:battery-40
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 40
+
+  sigenergy_min_soc_hour_16:
+    name: "Sigenergy — Min SOC 16:00"
+    icon: mdi:battery-40
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 45
+
+  sigenergy_min_soc_hour_17:
+    name: "Sigenergy — Min SOC 17:00"
+    icon: mdi:battery-50
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 50
+
+  sigenergy_min_soc_hour_18:
+    name: "Sigenergy — Min SOC 18:00"
+    icon: mdi:battery-60
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 55
+
+  sigenergy_min_soc_hour_19:
+    name: "Sigenergy — Min SOC 19:00"
+    icon: mdi:battery-50
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 50
+
+  sigenergy_min_soc_hour_20:
+    name: "Sigenergy — Min SOC 20:00"
+    icon: mdi:battery-50
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 45
+
+  sigenergy_min_soc_hour_21:
+    name: "Sigenergy — Min SOC 21:00"
+    icon: mdi:battery-40
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 40
+
+  sigenergy_min_soc_hour_22:
+    name: "Sigenergy — Min SOC 22:00"
+    icon: mdi:battery-30
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 35
+
+  sigenergy_min_soc_hour_23:
+    name: "Sigenergy — Min SOC 23:00"
+    icon: mdi:battery-30
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+    initial: 30
+
+  # RESERVE MONITORING HELPERS
+  sigenergy_rm_block_soc:
+    name: "Sigenergy RM — Block — SoC (%)"
+    min: 0
+    max: 100
+    step: 0.1
+    mode: box
+
+  sigenergy_rm_block_battery_available_kwh:
+    name: "Sigenergy RM — Block — Battery available (kWh)"
+    min: 0
+    max: 100
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_block_house_consumption_kwh:
+    name: "Sigenergy RM — Block — House consumption (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_block_grid_import_kwh:
+    name: "Sigenergy RM — Block — Grid import (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_block_grid_export_kwh:
+    name: "Sigenergy RM — Block — Grid export (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_block_battery_discharge_kwh:
+    name: "Sigenergy RM — Block — Battery discharge (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_block_battery_charge_kwh:
+    name: "Sigenergy RM — Block — Battery charge (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_prev_house_consumption_kwh:
+    name: "Sigenergy RM — Prev — House consumption (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_prev_grid_import_kwh:
+    name: "Sigenergy RM — Prev — Grid import (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_prev_grid_export_kwh:
+    name: "Sigenergy RM — Prev — Grid export (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_prev_battery_discharge_kwh:
+    name: "Sigenergy RM — Prev — Battery discharge (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+  sigenergy_rm_prev_battery_charge_kwh:
+    name: "Sigenergy RM — Prev — Battery charge (kWh)"
+    min: 0
+    max: 9999999
+    step: 0.001
+    mode: box
+
+
+  # --- DAILY TRACKING (v3.8) ---
+  sigenergy_daily_min_soc:
+    name: "Sigenergy — Daily Min SOC"
+    icon: mdi:battery-low
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+    mode: box
+
+  sigenergy_daily_max_soc:
+    name: "Sigenergy — Daily Max SOC"
+    icon: mdi:battery-high
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+    mode: box
+
+  sigenergy_daily_export_earnings:
+    name: "Sigenergy — Daily Export Earnings"
+    icon: mdi:cash-plus
+    min: -100
+    max: 1000
+    step: 0.001
+    unit_of_measurement: "$"
+    mode: box
+
+  sigenergy_daily_export_missing_price:
+    name: "Sigenergy — Daily Export Missing Price kWh"
+    icon: mdi:alert-circle
+    min: -100
+    max: 1000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_prev_lifetime_export:
+    name: "Sigenergy — Previous Lifetime Export"
+    icon: mdi:counter
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_se_start_of_day_export:
+    name: "Sigenergy — SolarEdge Start of Day Export"
+    icon: mdi:solar-power
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_se_start_of_day_import:
+    name: "Sigenergy — SolarEdge Start of Day Import"
+    icon: mdi:transmission-tower-import
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_sigen_start_of_day_export:
+    name: "Sigenergy — Sigen Start of Day Export"
+    icon: mdi:battery-arrow-up
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_sigen_start_of_day_import:
+    name: "Sigenergy — Sigen Start of Day Import"
+    icon: mdi:battery-arrow-down
+    min: 0
+    max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  # --- MONTHLY TRACKING (v3.8.3) - uses SolarEdge meter as authoritative grid export ---
+  sigenergy_monthly_se_export_kwh:
+    name: "Sigenergy — Monthly SE Export kWh"
+    icon: mdi:calendar-export
+    min: 0
+    max: 100000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_monthly_export_earnings:
+    name: "Sigenergy — Monthly Export Earnings"
+    icon: mdi:calendar-currency
+    min: -1000
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "$"
+    mode: box
+
+  sigenergy_monthly_export_missing_price:
+    name: "Sigenergy — Monthly Export Missing Price kWh"
+    icon: mdi:calendar-alert
+    min: 0
+    max: 100000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_prev_se_lifetime_export:
+    name: "Sigenergy — Previous SE Lifetime Export"
+    icon: mdi:counter
+    min: 0
+    max: 100000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_month_start_se_export:
+    name: "Sigenergy — Month Start SE Export"
+    icon: mdi:calendar-start
+    min: 0
+    max: 100000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+input_datetime:
+  sigenergy_rm_block_timestamp:
+    name: "Sigenergy RM — Block — Timestamp"
+    has_date: true
+    has_time: true
+
+# =============================================================================
+# UTILITY METERS - Daily energy tracking (resets at midnight)
+# =============================================================================
+utility_meter:
+  sigenergy_daily_grid_export:
+    source: sensor.sigen_0_grid_sensor_lifetime_export_energy
+    name: "Sigenergy — Daily Grid Export"
+    cycle: daily
+
+  sigenergy_daily_grid_import:
+    source: sensor.sigen_0_grid_sensor_lifetime_import_energy
+    name: "Sigenergy — Daily Grid Import"
+    cycle: daily
+
+  sigenergy_daily_battery_charge:
+    source: sensor.sigen_0_accumulated_charge_energy
+    name: "Sigenergy — Daily Battery Charge"
+    cycle: daily
+
+  sigenergy_daily_battery_discharge:
+    source: sensor.sigen_0_accumulated_discharge_energy
+    name: "Sigenergy — Daily Battery Discharge"
+    cycle: daily
+
+  sigenergy_daily_pv_yield:
+    source: sensor.sigen_0_lifetime_pv_energy
+    name: "Sigenergy — Daily PV Yield"
+    cycle: daily
+
+  sigenergy_daily_consumption:
+    source: sensor.sigen_0_lifetime_consumed_energy
+    name: "Sigenergy — Daily Consumption"
+    cycle: daily
+
+# =============================================================================
+# TEMPLATE SENSORS
+# =============================================================================
+template:
+  - sensor:
+      - name: "Sigenergy — Current Min SOC"
+        unique_id: sigenergy_current_min_soc
+        unit_of_measurement: "%"
+        icon: mdi:battery-clock
+        state: >
+          {% set hour = now().hour %}
+          {% set helper = 'input_number.sigenergy_min_soc_hour_' ~ '%02d' | format(hour) %}
+          {{ states(helper) | float(20) }}
+
+      - name: "Sigenergy — Remote EMS Status"
+        unique_id: sigenergy_remote_ems_status
+        icon: mdi:remote
+        state: >
+          {% if is_state('switch.sigen_0_plant_remote_ems', 'on') %}
+            Active (HA controlling)
+          {% else %}
+            Inactive (local mode)
+          {% endif %}
+
+      - name: "Sigenergy — Desired Export Limit"
+        unique_id: sigenergy_desired_export_limit
+        unit_of_measurement: "kW"
+        icon: mdi:transmission-tower-export
+        state: >
+          {% set master = is_state('input_boolean.sigenergy_master_enabled', 'on') %}
+          {% set grid_charging = is_state('input_boolean.sigenergy_grid_charge_active', 'on') %}
+          {% set export_allowed = is_state('binary_sensor.sigenergy_export_allowed', 'on') %}
+          {% if not master or grid_charging %}
+            0
+          {% elif export_allowed %}
+            {{ states('input_number.sigenergy_export_limit_kw') | float(5) }}
+          {% else %}
+            0
+          {% endif %}
+
+      - name: "Sigenergy — Dynamic Discharge Target"
+        unique_id: sigenergy_dynamic_discharge_target
+        unit_of_measurement: "kW"
+        icon: mdi:battery-arrow-down
+        state: >
+          {% set export_active = is_state('input_boolean.sigenergy_export_active', 'on') %}
+          {% if not export_active %}
+            0
+          {% else %}
+            {% set desired_export = states('input_number.sigenergy_export_limit_kw') | float(5) %}
+            {% set actual_export = states('sensor.sigen_0_grid_sensor_export_power') | float(0) / 1000 %}
+            {% set actual_import = states('sensor.sigen_0_grid_sensor_import_power') | float(0) / 1000 %}
+            {% set current_discharge = states('sensor.sigen_0_battery_discharging_power') | float(0) / 1000 %}
+            {% if current_discharge < 0.1 %}
+              {{ [desired_export + 3, 10] | min }}
+            {% else %}
+              {% set house_absorbed = [current_discharge - actual_export + actual_import, 0] | max %}
+              {{ [[desired_export + house_absorbed, 10] | min, desired_export] | max | round(1) }}
+            {% endif %}
+          {% endif %}
+
+      - name: "Sigenergy — State Mismatch"
+        unique_id: sigenergy_state_mismatch
+        icon: mdi:alert-circle
+        state: >
+          {% set current_limit = states('number.sigen_0_plant_grid_max_export_limit') | float(-1) %}
+          {% set desired_limit = states('sensor.sigenergy_desired_export_limit') | float(-2) %}
+          {% set export_active = is_state('input_boolean.sigenergy_export_active', 'on') %}
+          {% set export_allowed = is_state('binary_sensor.sigenergy_export_allowed', 'on') %}
+          {% set remote_ems_on = is_state('switch.sigen_0_plant_remote_ems', 'on') %}
+          {% set master_on = is_state('input_boolean.sigenergy_master_enabled', 'on') %}
+          {% set current_mode = states('select.sigen_0_plant_remote_ems_control_mode') %}
+          {% set grid_charging = is_state('input_boolean.sigenergy_grid_charge_active', 'on') %}
+          {% if not master_on %}
+            No (master off)
+          {% elif not remote_ems_on %}
+            Yes (Remote EMS off)
+          {% elif export_active and 'Command Discharging' not in current_mode %}
+            Yes (wrong mode: {{ current_mode }})
+          {% elif not export_active and not grid_charging and 'Maximum Self-consumption' not in current_mode %}
+            Yes (wrong mode: {{ current_mode }})
+          {% elif (current_limit | round(0)) != (desired_limit | round(0)) %}
+            Yes (limit {{ current_limit | round(1) }} != {{ desired_limit | round(1) }})
+          {% elif export_allowed and not export_active %}
+            Yes (should be exporting)
+          {% elif not export_allowed and export_active %}
+            Yes (should not be exporting)
+          {% else %}
+            No
+          {% endif %}
+
+      # --- v3.8.3: Monthly earnings estimate sensors ---
+      - name: "Sigenergy — Monthly Avg Feed-in Price"
+        unique_id: sigenergy_monthly_avg_feed_in_price
+        unit_of_measurement: "c/kWh"
+        icon: mdi:chart-line
+        state: >
+          {% set earnings = states('input_number.sigenergy_monthly_export_earnings') | float(0) %}
+          {% set kwh = states('input_number.sigenergy_monthly_se_export_kwh') | float(0) %}
+          {% if kwh > 0.1 %}
+            {{ ((earnings / kwh) * 100) | round(2) }}
+          {% else %}
+            0
+          {% endif %}
+
+      - name: "Sigenergy — Monthly Estimate Summary"
+        unique_id: sigenergy_monthly_estimate_summary
+        icon: mdi:currency-usd
+        state: >
+          {% set earnings = states('input_number.sigenergy_monthly_export_earnings') | float(0) %}
+          {% set kwh = states('input_number.sigenergy_monthly_se_export_kwh') | float(0) %}
+          {% set missing = states('input_number.sigenergy_monthly_export_missing_price') | float(0) %}
+          {% if kwh > 0.1 %}
+            {% set avg_price = ((earnings / kwh) * 100) | round(1) %}
+            {{ avg_price }} c/kWh avg × {{ kwh | round(1) }} kWh = ${{ earnings | round(2) }}
+          {% else %}
+            No exports this month
+          {% endif %}
+
+  - binary_sensor:
+      - name: "Sigenergy — Remote EMS Active"
+        unique_id: sigenergy_remote_ems_active
+        icon: mdi:remote
+        state: >
+          {{ is_state('switch.sigen_0_plant_remote_ems', 'on') }}
+
+      - name: "Sigenergy — Export Allowed"
+        unique_id: sigenergy_export_allowed
+        icon: mdi:export
+        state: >
+          {% set master = is_state('input_boolean.sigenergy_master_enabled', 'on') %}
+          {% set grid_charging = is_state('input_boolean.sigenergy_grid_charge_active', 'on') %}
+          {% set feed_in_raw = states('sensor.glenn_home_feed_in_price') %}
+          {% set feed_in = feed_in_raw | float(-999) %}
+          {% set threshold = states('input_number.sigenergy_export_threshold') | float(0.033) %}
+          {% set soc = states('sensor.sigen_0_plant_battery_soc') | float(0) %}
+          {% set min_soc = states('sensor.sigenergy_current_min_soc') | float(20) %}
+          {% set price_valid = feed_in_raw not in ['unknown', 'unavailable', 'none', ''] and feed_in != -999 %}
+          {{ master and not grid_charging and price_valid and feed_in >= threshold and soc >= min_soc }}
+
+      - name: "Sigenergy — Grid Charge Allowed"
+        unique_id: sigenergy_grid_charge_allowed
+        icon: mdi:battery-charging
+        state: >
+          {% set master = is_state('input_boolean.sigenergy_master_enabled', 'on') %}
+          {% set import_raw = states('sensor.glenn_home_general_price') %}
+          {% set import_price = import_raw | float(999) %}
+          {% set price_valid = import_raw not in ['unknown', 'unavailable', 'none', ''] %}
+          {{ master and price_valid and import_price <= 0 }}
+
+      - name: "Sigenergy — Feed-in Above Threshold"
+        unique_id: sigenergy_feed_in_above_threshold
+        icon: mdi:trending-up
+        state: >
+          {% set feed_in_raw = states('sensor.glenn_home_feed_in_price') %}
+          {% set feed_in = feed_in_raw | float(-999) %}
+          {% set threshold = states('input_number.sigenergy_export_threshold') | float(0.033) %}
+          {% set price_valid = feed_in_raw not in ['unknown', 'unavailable', 'none', ''] and feed_in != -999 %}
+          {{ price_valid and feed_in >= threshold }}
+
+      - name: "Amber Import Free or Negative"
+        unique_id: amber_import_free_or_negative
+        icon: mdi:lightning-bolt
+        state: >
+          {% set import_raw = states('sensor.glenn_home_general_price') %}
+          {% set import_price = import_raw | float(999) %}
+          {% set price_valid = import_raw not in ['unknown', 'unavailable', 'none', ''] %}
+          {{ price_valid and import_price <= 0 }}
+
+      - name: "Sigenergy — Needs Correction"
+        unique_id: sigenergy_needs_correction
+        icon: mdi:alert
+        state: >
+          {{ not states('sensor.sigenergy_state_mismatch').startswith('No') }}
+
+# =============================================================================
+# SCRIPTS
+# =============================================================================
+script:
+  sigenergy_ensure_remote_ems:
+    alias: "Sigenergy — Ensure Remote EMS Active"
+    description: "Ensure system is in Remote EMS mode (HA control enabled)"
+    icon: mdi:remote
+    mode: single
+    sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.sigen_0_plant_remote_ems
+      - delay:
+          seconds: 2
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: 0
+      - delay:
+          seconds: 1
+      - action: select.select_option
+        target:
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Maximum Self-consumption (Default)"
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: 0
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_export_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_import_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_import_limit
+        data:
+          value: 4294967.295
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.sigenergy_export_active
+            - input_boolean.sigenergy_grid_charge_active
+      - action: system_log.write
+        data:
+          message: "Sigenergy: Remote EMS ensured active, defaults set (Max Self-consumption, active power 0)"
+          level: info
+          logger: sigenergy.control
+
+  sigenergy_enable_export:
+    alias: "Sigenergy — Enable Export"
+    description: "Enable grid export via Command Discharging with dynamic discharge"
+    icon: mdi:export
+    mode: single
+    sequence:
+      - action: select.select_option
+        target:
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Command Discharging (Output power from the battery first)"
+      - delay:
+          seconds: 2
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: "{{ states('input_number.sigenergy_export_limit_kw') | float(5) }}"
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_export_limit
+        data:
+          value: 4294967.295
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: "{{ [states('input_number.sigenergy_export_limit_kw') | float(5) + 3, 10] | min }}"
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.sigenergy_export_active
+      - action: system_log.write
+        data:
+          message: >-
+            Sigenergy: Export ENABLED — Command Discharging mode,
+            Initial discharge {{ [states('input_number.sigenergy_export_limit_kw') | float(5) + 3, 10] | min }} kW,
+            Grid limit {{ states('input_number.sigenergy_export_limit_kw') }} kW,
+            Price {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh
+          level: info
+          logger: sigenergy.export
+
+  sigenergy_disable_export:
+    alias: "Sigenergy — Disable Export"
+    description: "Disable grid export (return to Max Self-consumption)"
+    icon: mdi:export-variant
+    mode: single
+    sequence:
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: 0
+      - delay:
+          seconds: 1
+      - action: select.select_option
+        target:
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Maximum Self-consumption (Default)"
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: 0
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_export_limit
+        data:
+          value: 4294967.295
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.sigenergy_export_active
+      - action: system_log.write
+        data:
+          message: >-
+            Sigenergy: Export DISABLED — Max Self-consumption mode,
+            Price {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh
+          level: info
+          logger: sigenergy.export
+
+  sigenergy_start_grid_charge:
+    alias: "Sigenergy — Start Grid Charge"
+    description: "Start charging battery from grid (free/negative prices)"
+    icon: mdi:battery-charging
+    mode: single
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.sigenergy_grid_charge_active
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.sigenergy_export_active
+      - action: select.select_option
+        target:
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Command Charging (Consume power from the grid first)"
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: 0
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_import_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_import_limit
+        data:
+          value: 4294967.295
+      - action: system_log.write
+        data:
+          message: "Sigenergy: Grid Charge STARTED - Import price {{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }} c/kWh"
+          level: info
+          logger: sigenergy.gridcharge
+
+  sigenergy_stop_grid_charge:
+    alias: "Sigenergy — Stop Grid Charge"
+    description: "Stop grid charging and return to self-consumption"
+    icon: mdi:battery-off
+    mode: single
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.sigenergy_grid_charge_active
+      - action: select.select_option
+        target:
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Maximum Self-consumption (Default)"
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: 0
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_import_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_import_limit
+        data:
+          value: 4294967.295
+      - action: system_log.write
+        data:
+          message: "Sigenergy: Grid Charge STOPPED"
+          level: info
+          logger: sigenergy.gridcharge
+
+  sigenergy_force_safe_state:
+    alias: "Sigenergy — Force Safe State"
+    description: "Emergency: reset to safe defaults within Remote EMS"
+    icon: mdi:shield-lock
+    mode: single
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: 
+            - input_boolean.sigenergy_grid_charge_active
+            - input_boolean.sigenergy_export_active
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+        data:
+          value: 0
+      - delay:
+          seconds: 1
+      - action: select.select_option
+        target:
+          entity_id: select.sigen_0_plant_remote_ems_control_mode
+        data:
+          option: "Maximum Self-consumption (Default)"
+      - delay:
+          seconds: 1
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_export_limit
+        data:
+          value: 0
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_export_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_grid_max_import_limit
+        data:
+          value: 4294967.295
+      - action: number.set_value
+        target:
+          entity_id: number.sigen_0_plant_pcs_max_import_limit
+        data:
+          value: 4294967.295
+
+  sigenergy_exit_remote_ems:
+    alias: "Sigenergy — Exit Remote EMS (Local Mode)"
+    description: "Return to local Self-Consumption (HA loses control)"
+    icon: mdi:home-remove
+    mode: single
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: 
+            - input_boolean.sigenergy_grid_charge_active
+            - input_boolean.sigenergy_export_active
+      - action: switch.turn_off
+        target:
+          entity_id: switch.sigen_0_plant_remote_ems
+
+  sigenergy_synchronize_state:
+    alias: "Sigenergy — Synchronize State"
+    description: "Proactively check and correct system state"
+    icon: mdi:sync
+    mode: single
+    sequence:
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: switch.sigen_0_plant_remote_ems
+                state: "off"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_ensure_remote_ems
+              - delay:
+                  seconds: 5
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.sigenergy_grid_charge_allowed
+                state: "on"
+              - condition: state
+                entity_id: input_boolean.sigenergy_grid_charge_active
+                state: "off"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_start_grid_charge
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.sigenergy_grid_charge_allowed
+                state: "off"
+              - condition: state
+                entity_id: input_boolean.sigenergy_grid_charge_active
+                state: "on"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_stop_grid_charge
+      - delay:
+          seconds: 2
+      - condition: state
+        entity_id: input_boolean.sigenergy_grid_charge_active
+        state: "off"
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.sigenergy_export_allowed
+                state: "on"
+              - condition: state
+                entity_id: input_boolean.sigenergy_export_active
+                state: "off"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_enable_export
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.sigenergy_export_allowed
+                state: "off"
+              - condition: state
+                entity_id: input_boolean.sigenergy_export_active
+                state: "on"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_disable_export
+      - delay:
+          seconds: 2
+      - variables:
+          current_limit: "{{ states('number.sigen_0_plant_grid_max_export_limit') | float(0) }}"
+          desired_limit: "{{ states('sensor.sigenergy_desired_export_limit') | float(0) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ (current_limit | round(0)) != (desired_limit | round(0)) }}"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_grid_max_export_limit
+                data:
+                  value: "{{ desired_limit }}"
+              - action: system_log.write
+                data:
+                  message: "Sigenergy: SYNC corrected export limit from {{ current_limit }} to {{ desired_limit }} kW"
+                  level: warning
+                  logger: sigenergy.sync
+      # Check control mode matches current state
+      - variables:
+          current_mode: "{{ states('select.sigen_0_plant_remote_ems_control_mode') }}"
+          export_on: "{{ is_state('input_boolean.sigenergy_export_active', 'on') }}"
+          charge_on: "{{ is_state('input_boolean.sigenergy_grid_charge_active', 'on') }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ export_on and 'Command Discharging' not in current_mode }}"
+            sequence:
+              - action: select.select_option
+                target:
+                  entity_id: select.sigen_0_plant_remote_ems_control_mode
+                data:
+                  option: "Command Discharging (Output power from the battery first)"
+              - delay:
+                  seconds: 2
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+                data:
+                  value: "{{ states('sensor.sigenergy_dynamic_discharge_target') | float(5) }}"
+              - action: system_log.write
+                data:
+                  message: "Sigenergy: SYNC corrected mode to Command Discharging (was {{ current_mode }})"
+                  level: warning
+                  logger: sigenergy.sync
+          - conditions:
+              - condition: template
+                value_template: "{{ not export_on and not charge_on and 'Maximum Self-consumption' not in current_mode }}"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+                data:
+                  value: 0
+              - delay:
+                  seconds: 1
+              - action: select.select_option
+                target:
+                  entity_id: select.sigen_0_plant_remote_ems_control_mode
+                data:
+                  option: "Maximum Self-consumption (Default)"
+              - action: system_log.write
+                data:
+                  message: "Sigenergy: SYNC corrected mode to Max Self-consumption (was {{ current_mode }})"
+                  level: warning
+                  logger: sigenergy.sync
+
+  sigenergy_initialize_soc_schedule:
+    alias: "Sigenergy — Initialize SOC Schedule (Conservative)"
+    description: "Set all hourly SOC minimums to Conservative mode values"
+    icon: mdi:clock-check
+    mode: single
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_00
+        data:
+          value: 28
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_01
+        data:
+          value: 25
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_02
+        data:
+          value: 22
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_03
+        data:
+          value: 19
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_04
+        data:
+          value: 16
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_05
+        data:
+          value: 13
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_06
+        data:
+          value: 10
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_07
+        data:
+          value: 10
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_08
+        data:
+          value: 15
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_09
+        data:
+          value: 15
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_10
+        data:
+          value: 20
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_11
+        data:
+          value: 20
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_12
+        data:
+          value: 25
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_13
+        data:
+          value: 30
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_14
+        data:
+          value: 35
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_15
+        data:
+          value: 40
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_16
+        data:
+          value: 45
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_17
+        data:
+          value: 50
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_18
+        data:
+          value: 55
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_19
+        data:
+          value: 50
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_20
+        data:
+          value: 45
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_21
+        data:
+          value: 40
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_22
+        data:
+          value: 35
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_min_soc_hour_23
+        data:
+          value: 30
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_export_threshold
+        data:
+          value: 0.033
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_export_limit_kw
+        data:
+          value: 5
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_feed_in_price
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_import_price
+        data:
+          value: 0
+
+  sigenergy_debug_snapshot:
+    alias: "Sigenergy — Debug Snapshot"
+    description: "Show current system state in a persistent notification"
+    icon: mdi:bug
+    mode: single
+    sequence:
+      - action: persistent_notification.create
+        data:
+          title: "Sigenergy Debug Snapshot"
+          notification_id: sigenergy_debug
+          message: >
+            **Time:** {{ now().strftime('%Y-%m-%d %H:%M:%S') }}
+            
+            === REMOTE EMS STATUS ===
+            **Switch State:** {{ states('switch.sigen_0_plant_remote_ems') }} (on=HA control, off=local)
+            **Remote EMS Active:** {{ states('binary_sensor.sigenergy_remote_ems_active') }}
+            **EMS Mode:** {{ states('select.sigen_0_plant_remote_ems_control_mode') }}
+            
+            === HA CONTROL STATUS ===
+            **Master Enabled:** {{ states('input_boolean.sigenergy_master_enabled') }}
+            **Export Active:** {{ states('input_boolean.sigenergy_export_active') }}
+            **Grid Charge Active:** {{ states('input_boolean.sigenergy_grid_charge_active') }}
+            **Export Allowed:** {{ states('binary_sensor.sigenergy_export_allowed') }}
+            
+            === DYNAMIC DISCHARGE ===
+            **Active Power Target:** {{ states('number.sigen_0_plant_active_power_fixed_adjustment_target_value') }} kW
+            **Dynamic Target:** {{ states('sensor.sigenergy_dynamic_discharge_target') }} kW
+            **Battery Discharging:** {{ (states('sensor.sigen_0_battery_discharging_power') | float(0) / 1000) | round(2) }} kW
+            **Grid Export:** {{ (states('sensor.sigen_0_grid_sensor_export_power') | float(0) / 1000) | round(2) }} kW
+            **Grid Import:** {{ (states('sensor.sigen_0_grid_sensor_import_power') | float(0) / 1000) | round(2) }} kW
+            
+            === STATE SYNC ===
+            **Desired Export Limit:** {{ states('sensor.sigenergy_desired_export_limit') }} kW
+            **Actual Export Limit:** {{ states('number.sigen_0_plant_grid_max_export_limit') }} kW
+            **State Mismatch:** {{ states('sensor.sigenergy_state_mismatch') }}
+            **Needs Correction:** {{ states('binary_sensor.sigenergy_needs_correction') }}
+            
+            === BATTERY ===
+            **SOC:** {{ states('sensor.sigen_0_plant_battery_soc') }}%
+            **Min SOC (this hour):** {{ states('sensor.sigenergy_current_min_soc') }}%
+            
+            === PRICES ===
+            **Feed-in:** {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }} c/kWh
+            **Import:** {{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }} c/kWh
+            **Export Threshold:** {{ (states('input_number.sigenergy_export_threshold') | float(0) * 100) | round(1) }} c/kWh
+
+# =============================================================================
+# AUTOMATIONS
+# =============================================================================
+automation:
+
+  # --- v3.8.2: Comprehensive startup recovery ---
+  - id: 'sigenergy_startup_recovery'
+    alias: "Sigenergy — Startup Recovery"
+    description: "Detect and fix reset values after HA restart/crash"
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+    actions:
+      - delay:
+          seconds: 30
+      - variables:
+          master_off: "{{ is_state('input_boolean.sigenergy_master_enabled', 'off') }}"
+          threshold_reset: "{{ states('input_number.sigenergy_export_threshold') | float(0) == 0 }}"
+          limit_reset: "{{ states('input_number.sigenergy_export_limit_kw') | float(0) == 0 }}"
+          soc_reset: "{{ states('input_number.sigenergy_min_soc_hour_18') | float(0) == 0 }}"
+          se_prev_reset: "{{ states('input_number.sigenergy_prev_se_lifetime_export') | float(0) == 0 }}"
+          current_se_export: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+          needs_recovery: "{{ master_off or threshold_reset or limit_reset or soc_reset }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ needs_recovery }}"
+            sequence:
+              - action: system_log.write
+                data:
+                  message: >-
+                    Sigenergy: Startup recovery triggered. 
+                    Master OFF: {{ master_off }}, 
+                    Threshold reset: {{ threshold_reset }}, 
+                    Limit reset: {{ limit_reset }}, 
+                    SOC reset: {{ soc_reset }}
+                  level: warning
+                  logger: sigenergy.startup
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ master_off }}"
+                    sequence:
+                      - action: input_boolean.turn_on
+                        target:
+                          entity_id: input_boolean.sigenergy_master_enabled
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ threshold_reset }}"
+                    sequence:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.sigenergy_export_threshold
+                        data:
+                          value: 0.033
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ limit_reset }}"
+                    sequence:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.sigenergy_export_limit_kw
+                        data:
+                          value: 5
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ soc_reset }}"
+                    sequence:
+                      - action: script.turn_on
+                        target:
+                          entity_id: script.sigenergy_set_conservative_soc_schedule
+              - action: persistent_notification.create
+                data:
+                  title: "Sigenergy: Startup Recovery"
+                  message: >-
+                    Detected and fixed reset values after restart:
+                    {% if master_off %}• Master switch → ON{% endif %}
+                    {% if threshold_reset %}• Export threshold → 3.3 c/kWh{% endif %}
+                    {% if limit_reset %}• Export limit → 5 kW{% endif %}
+                    {% if soc_reset %}• SOC schedule → Conservative{% endif %}
+                  notification_id: sigenergy_startup_recovery
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ se_prev_reset and current_se_export > 0 }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_prev_se_lifetime_export
+                data:
+                  value: "{{ current_se_export }}"
+              - action: system_log.write
+                data:
+                  message: "Sigenergy: Initialized SE prev_lifetime_export to {{ current_se_export }} for monthly tracking"
+                  level: info
+                  logger: sigenergy.startup
+  - id: 'sigenergy_ha_start_ensure_remote_ems'
+    alias: "Sigenergy — HA Start: Ensure Remote EMS"
+    description: "On HA start, ensure Remote EMS is active and synchronize state"
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+    actions:
+      - delay:
+          seconds: 30
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_ensure_remote_ems
+      - delay:
+          seconds: 5
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_synchronize_state
+
+  - id: 'sigenergy_proactive_state_enforcement'
+    alias: "Sigenergy — Proactive State Enforcement"
+    description: "Proactively check and correct state every 5 minutes"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_synchronize_state
+
+  - id: 'sigenergy_dynamic_discharge_adjustment'
+    alias: "Sigenergy — Dynamic Discharge Adjustment"
+    description: "Adjust discharge target every 30s to maintain desired grid export"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        seconds: "/30"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_export_active
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+    actions:
+      - variables:
+          desired_target: "{{ states('sensor.sigenergy_dynamic_discharge_target') | float(5) }}"
+          current_target: "{{ states('number.sigen_0_plant_active_power_fixed_adjustment_target_value') | float(0) }}"
+          actual_export: "{{ (states('sensor.sigen_0_grid_sensor_export_power') | float(0) / 1000) | round(1) }}"
+          actual_import: "{{ (states('sensor.sigen_0_grid_sensor_import_power') | float(0) / 1000) | round(1) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ (desired_target - current_target) | abs > 0.4 }}"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_active_power_fixed_adjustment_target_value
+                data:
+                  value: "{{ desired_target }}"
+              - action: system_log.write
+                data:
+                  message: >-
+                    Sigenergy: Dynamic discharge {{ current_target }} → {{ desired_target }} kW
+                    (grid export: {{ actual_export }} kW, import: {{ actual_import }} kW)
+                  level: info
+                  logger: sigenergy.discharge
+
+  - id: 'sigenergy_remote_ems_watchdog'
+    alias: "Sigenergy — Remote EMS Watchdog"
+    description: "Re-enable Remote EMS if it gets disabled while master is on"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: switch.sigen_0_plant_remote_ems
+        to: "off"
+        for:
+          seconds: 10
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_ensure_remote_ems
+
+  - id: 'sigenergy_track_feed_in_price'
+    alias: "Sigenergy — Track Feed-in Price Changes"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: sensor.glenn_home_feed_in_price
+    conditions:
+      - condition: template
+        value_template: >
+          {{ trigger.from_state is not none 
+             and trigger.from_state.state not in ['unknown', 'unavailable', 'none', '']
+             and trigger.to_state.state not in ['unknown', 'unavailable', 'none', ''] }}
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_feed_in_price
+        data:
+          value: "{{ (trigger.from_state.state | float(0) * 100) | round(2) }}"
+
+  - id: 'sigenergy_track_import_price'
+    alias: "Sigenergy — Track Import Price Changes"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: sensor.glenn_home_general_price
+    conditions:
+      - condition: template
+        value_template: >
+          {{ trigger.from_state is not none 
+             and trigger.from_state.state not in ['unknown', 'unavailable', 'none', '']
+             and trigger.to_state.state not in ['unknown', 'unavailable', 'none', ''] }}
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_import_price
+        data:
+          value: "{{ (trigger.from_state.state | float(0) * 100) | round(2) }}"
+
+  - id: 'sigenergy_export_policy'
+    alias: "Sigenergy — Export Policy"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.sigenergy_export_allowed
+      - trigger: state
+        entity_id: sensor.glenn_home_feed_in_price
+      - trigger: state
+        entity_id: sensor.sigen_0_plant_battery_soc
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.sigenergy_grid_charge_active
+        state: "off"
+    actions:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.sigenergy_export_allowed
+                state: "on"
+              - condition: state
+                entity_id: input_boolean.sigenergy_export_active
+                state: "off"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_enable_export
+          - conditions:
+              - condition: state
+                entity_id: binary_sensor.sigenergy_export_allowed
+                state: "off"
+              - condition: state
+                entity_id: input_boolean.sigenergy_export_active
+                state: "on"
+            sequence:
+              - action: script.turn_on
+                target:
+                  entity_id: script.sigenergy_disable_export
+
+  - id: 'sigenergy_grid_charge_start'
+    alias: "Sigenergy — Grid Charge: Start"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.glenn_home_general_price
+        below: 0.001
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.sigenergy_grid_charge_active
+        state: "off"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_start_grid_charge
+
+  - id: 'sigenergy_grid_charge_stop'
+    alias: "Sigenergy — Grid Charge: Stop"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.glenn_home_general_price
+        above: 0
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_grid_charge_active
+        state: "on"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_stop_grid_charge
+
+  - id: 'sigenergy_notify_feed_in_above_threshold'
+    alias: "Sigenergy — Notify: Feed-in Above Threshold"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.sigenergy_feed_in_above_threshold
+        to: "on"
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.from_state is not none and trigger.from_state.state == 'off' }}"
+    actions:
+      - variables:
+          feed_in_now: "{{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }}"
+          feed_in_prev: "{{ states('input_number.sigenergy_prev_feed_in_price') | float(0) | round(1) }}"
+          import_now: "{{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }}"
+          threshold: "{{ (states('input_number.sigenergy_export_threshold') | float(0.033) * 100) | round(1) }}"
+          soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
+          min_soc: "{{ states('sensor.sigenergy_current_min_soc') | float(20) | round(0) }}"
+          soc_ok: "{{ soc >= min_soc }}"
+          master_on: "{{ is_state('input_boolean.sigenergy_master_enabled', 'on') }}"
+          start_time_attr: "{{ state_attr('sensor.glenn_home_feed_in_price', 'start_time') }}"
+          interval_start_local: "{% if start_time_attr %}{{ as_local(as_datetime(start_time_attr)).strftime('%H:%M:%S') }}{% else %}{{ now().strftime('%H:%M:%S') }}{% endif %}"
+          interval_hour_local: "{% if start_time_attr %}{{ as_local(as_datetime(start_time_attr)).strftime('%H:%M') }}{% else %}{{ now().strftime('%H:%M') }}{% endif %}"
+          ha_received_local: "{{ now().strftime('%H:%M:%S') }}"
+          delay_s: "{% if start_time_attr %}{{ ((now() - as_datetime(start_time_attr)).total_seconds()) | int }}{% else %}0{% endif %}"
+          action_title: "{% if not master_on %}Export blocked — Master disabled{% elif not soc_ok %}Export blocked — SOC too low{% else %}I am exporting now!{% endif %}"
+          accent_color: "{% if master_on and soc_ok %}#137333{% else %}#E37400{% endif %}"
+          bg_color: "{% if master_on and soc_ok %}#E6F4EA{% else %}#FFF4E5{% endif %}"
+          soc_line: "{% if not master_on %}Export was blocked because Master is disabled{% elif not soc_ok %}Export was blocked because battery SOC of {{ soc }}% did not meet the {{ min_soc }}% reserve required for {{ interval_hour_local }}{% else %}Current battery state of charge: {{ soc }}%{% endif %}"
+          email_subject: "Feed-in price changed from {{ feed_in_prev }} to {{ feed_in_now }} c/kWh for interval starting {{ interval_start_local }}"
+          monthly_kwh: "{{ states('input_number.sigenergy_monthly_se_export_kwh') | float(0) | round(1) }}"
+          monthly_earnings: "{{ states('input_number.sigenergy_monthly_export_earnings') | float(0) | round(2) }}"
+          monthly_avg_price: "{% if monthly_kwh > 0.1 %}{{ ((monthly_earnings / monthly_kwh) * 100) | round(1) }}{% else %}0{% endif %}"
+          monthly_estimate_line: "Estimated monthly earnings to date: {{ monthly_avg_price }} c/kWh avg × {{ monthly_kwh }} kWh = ${{ monthly_earnings }}"
+      - action: notify.mobile_app_glenns_iphone
+        data:
+          title: "{{ action_title }}"
+          message: "Feed-in: {{ feed_in_prev }} → {{ feed_in_now }} c/kWh | SOC: {{ soc }}%{% if not soc_ok %} (need {{ min_soc }}%){% endif %}"
+      - action: notify.email_glenn_energy_summary
+        data:
+          title: "{{ email_subject }}"
+          message: "Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.\nFeed-in price changed from {{ feed_in_prev }} to {{ feed_in_now }} c/kWh for interval starting {{ interval_start_local }}.\nExport recommendation switched ON (threshold {{ threshold }} c/kWh).\n{{ soc_line }}\nHome Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s).\n{{ monthly_estimate_line }}"
+          data:
+            html: "<html><body style='margin:0;padding:0;background:#fff;'><div style='max-width:600px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'><div style='border:1px solid #dadce0;border-left:6px solid {{ accent_color }};border-radius:12px;overflow:hidden;margin:12px 0;'><div style='background:{{ bg_color }};padding:10px 12px;font-weight:700;'>{{ action_title }}</div><div style='padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.5;color:#111;'>Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.<br>Feed-in price changed from {{ feed_in_prev }} to {{ feed_in_now }} c/kWh for interval starting {{ interval_start_local }}.<br>Export recommendation switched ON (threshold {{ threshold }} c/kWh).<br>{{ soc_line }}<br>Home Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s).<br><br><strong>{{ monthly_estimate_line }}</strong></div></div></div></body></html>"
+
+  - id: 'sigenergy_notify_feed_in_below_threshold'
+    alias: "Sigenergy — Notify: Feed-in Below Threshold"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.sigenergy_feed_in_above_threshold
+        to: "off"
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.from_state is not none and trigger.from_state.state == 'on' }}"
+    actions:
+      - variables:
+          feed_in_now: "{{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }}"
+          feed_in_prev: "{{ states('input_number.sigenergy_prev_feed_in_price') | float(0) | round(1) }}"
+          import_now: "{{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }}"
+          threshold: "{{ (states('input_number.sigenergy_export_threshold') | float(0.033) * 100) | round(1) }}"
+          soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
+          start_time_attr: "{{ state_attr('sensor.glenn_home_feed_in_price', 'start_time') }}"
+          interval_start_local: "{% if start_time_attr %}{{ as_local(as_datetime(start_time_attr)).strftime('%H:%M:%S') }}{% else %}{{ now().strftime('%H:%M:%S') }}{% endif %}"
+          ha_received_local: "{{ now().strftime('%H:%M:%S') }}"
+          delay_s: "{% if start_time_attr %}{{ ((now() - as_datetime(start_time_attr)).total_seconds()) | int }}{% else %}0{% endif %}"
+          action_title: "I have stopped exporting!"
+          accent_color: "#D93025"
+          bg_color: "#FCE8E6"
+          email_subject: "Feed-in price changed from {{ feed_in_prev }} to {{ feed_in_now }} c/kWh for interval starting {{ interval_start_local }}"
+          monthly_kwh: "{{ states('input_number.sigenergy_monthly_se_export_kwh') | float(0) | round(1) }}"
+          monthly_earnings: "{{ states('input_number.sigenergy_monthly_export_earnings') | float(0) | round(2) }}"
+          monthly_avg_price: "{% if monthly_kwh > 0.1 %}{{ ((monthly_earnings / monthly_kwh) * 100) | round(1) }}{% else %}0{% endif %}"
+          monthly_estimate_line: "Estimated monthly earnings to date: {{ monthly_avg_price }} c/kWh avg × {{ monthly_kwh }} kWh = ${{ monthly_earnings }}"
+      - action: notify.mobile_app_glenns_iphone
+        data:
+          title: "{{ action_title }}"
+          message: "Feed-in: {{ feed_in_prev }} → {{ feed_in_now }} c/kWh | SOC: {{ soc }}%"
+      - action: notify.email_glenn_energy_summary
+        data:
+          title: "{{ email_subject }}"
+          message: "Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.\nFeed-in price changed from {{ feed_in_prev }} to {{ feed_in_now }} c/kWh for interval starting {{ interval_start_local }}.\nExport recommendation switched OFF (threshold {{ threshold }} c/kWh).\nCurrent battery state of charge: {{ soc }}%\nHome Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s).\n{{ monthly_estimate_line }}"
+          data:
+            html: "<html><body style='margin:0;padding:0;background:#fff;'><div style='max-width:600px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'><div style='border:1px solid #dadce0;border-left:6px solid {{ accent_color }};border-radius:12px;overflow:hidden;margin:12px 0;'><div style='background:{{ bg_color }};padding:10px 12px;font-weight:700;'>{{ action_title }}</div><div style='padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.5;color:#111;'>Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.<br>Feed-in price changed from {{ feed_in_prev }} to {{ feed_in_now }} c/kWh for interval starting {{ interval_start_local }}.<br>Export recommendation switched OFF (threshold {{ threshold }} c/kWh).<br>Current battery state of charge: {{ soc }}%<br>Home Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s).<br><br><strong>{{ monthly_estimate_line }}</strong></div></div></div></body></html>"
+
+  - id: 'sigenergy_notify_import_free'
+    alias: "Sigenergy — Notify: Import Free/Negative"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.amber_import_free_or_negative
+        to: "on"
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.from_state is not none and trigger.from_state.state == 'off' }}"
+    actions:
+      - variables:
+          feed_in_now: "{{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }}"
+          import_now: "{{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }}"
+          import_prev: "{{ states('input_number.sigenergy_prev_import_price') | float(0) | round(1) }}"
+          soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
+          start_time_attr: "{{ state_attr('sensor.glenn_home_general_price', 'start_time') }}"
+          interval_start_local: "{% if start_time_attr %}{{ as_local(as_datetime(start_time_attr)).strftime('%H:%M:%S') }}{% else %}{{ now().strftime('%H:%M:%S') }}{% endif %}"
+          ha_received_local: "{{ now().strftime('%H:%M:%S') }}"
+          delay_s: "{% if start_time_attr %}{{ ((now() - as_datetime(start_time_attr)).total_seconds()) | int }}{% else %}0{% endif %}"
+          action_title: "I am charging the battery!"
+          accent_color: "#E37400"
+          bg_color: "#FFF4E5"
+          email_subject: "Import price changed from {{ import_prev }} to {{ import_now }} c/kWh for interval starting {{ interval_start_local }}"
+      - action: notify.mobile_app_glenns_iphone
+        data:
+          title: "{{ action_title }}"
+          message: "Import: {{ import_prev }} → {{ import_now }} c/kWh | SOC: {{ soc }}%"
+      - action: notify.email_glenn_energy_summary
+        data:
+          title: "{{ email_subject }}"
+          message: "Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.\nImport price changed from {{ import_prev }} to {{ import_now }} c/kWh for interval starting {{ interval_start_local }}.\nGrid-charge recommendation switched ON (threshold 0 c/kWh).\nCurrent battery state of charge: {{ soc }}%\nHome Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s)."
+          data:
+            html: "<html><body style='margin:0;padding:0;background:#fff;'><div style='max-width:600px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'><div style='border:1px solid #dadce0;border-left:6px solid {{ accent_color }};border-radius:12px;overflow:hidden;margin:12px 0;'><div style='background:{{ bg_color }};padding:10px 12px;font-weight:700;'>{{ action_title }}</div><div style='padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.5;color:#111;'>Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.<br>Import price changed from {{ import_prev }} to {{ import_now }} c/kWh for interval starting {{ interval_start_local }}.<br>Grid-charge recommendation switched ON (threshold 0 c/kWh).<br>Current battery state of charge: {{ soc }}%<br>Home Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s).</div></div></div></body></html>"
+
+  - id: 'sigenergy_notify_import_positive'
+    alias: "Sigenergy — Notify: Import Positive"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.amber_import_free_or_negative
+        to: "off"
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.from_state is not none and trigger.from_state.state == 'on' }}"
+    actions:
+      - variables:
+          feed_in_now: "{{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(1) }}"
+          import_now: "{{ (states('sensor.glenn_home_general_price') | float(0) * 100) | round(1) }}"
+          import_prev: "{{ states('input_number.sigenergy_prev_import_price') | float(0) | round(1) }}"
+          soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
+          start_time_attr: "{{ state_attr('sensor.glenn_home_general_price', 'start_time') }}"
+          interval_start_local: "{% if start_time_attr %}{{ as_local(as_datetime(start_time_attr)).strftime('%H:%M:%S') }}{% else %}{{ now().strftime('%H:%M:%S') }}{% endif %}"
+          ha_received_local: "{{ now().strftime('%H:%M:%S') }}"
+          delay_s: "{% if start_time_attr %}{{ ((now() - as_datetime(start_time_attr)).total_seconds()) | int }}{% else %}0{% endif %}"
+          action_title: "I have stopped charging the battery!"
+          accent_color: "#1A73E8"
+          bg_color: "#E8F0FE"
+          email_subject: "Import price changed from {{ import_prev }} to {{ import_now }} c/kWh for interval starting {{ interval_start_local }}"
+      - action: notify.mobile_app_glenns_iphone
+        data:
+          title: "{{ action_title }}"
+          message: "Import: {{ import_prev }} → {{ import_now }} c/kWh | SOC: {{ soc }}%"
+      - action: notify.email_glenn_energy_summary
+        data:
+          title: "{{ email_subject }}"
+          message: "Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.\nImport price changed from {{ import_prev }} to {{ import_now }} c/kWh for interval starting {{ interval_start_local }}.\nGrid-charge recommendation switched OFF (threshold 0 c/kWh).\nCurrent battery state of charge: {{ soc }}%\nHome Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s)."
+          data:
+            html: "<html><body style='margin:0;padding:0;background:#fff;'><div style='max-width:600px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'><div style='border:1px solid #dadce0;border-left:6px solid {{ accent_color }};border-radius:12px;overflow:hidden;margin:12px 0;'><div style='background:{{ bg_color }};padding:10px 12px;font-weight:700;'>{{ action_title }}</div><div style='padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.5;color:#111;'>Interval prices: Feed-in {{ feed_in_now }} c/kWh; Import {{ import_now }} c/kWh.<br>Import price changed from {{ import_prev }} to {{ import_now }} c/kWh for interval starting {{ interval_start_local }}.<br>Grid-charge recommendation switched OFF (threshold 0 c/kWh).<br>Current battery state of charge: {{ soc }}%<br>Home Assistant received the first update at {{ ha_received_local }} (delay {{ delay_s }}s).</div></div></div></body></html>"
+
+
+  # --- v3.8: Daily Tracking Automations ---
+  - id: 'sigenergy_track_daily_soc_minmax'
+    alias: "Sigenergy — Track Daily SOC Min/Max"
+    description: "Update daily min/max SOC every 5 minutes"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.sigen_0_plant_battery_soc') not in ['unknown','unavailable','none'] }}"
+    actions:
+      - variables:
+          current_soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(50) }}"
+          current_min: "{{ states('input_number.sigenergy_daily_min_soc') | float(100) }}"
+          current_max: "{{ states('input_number.sigenergy_daily_max_soc') | float(0) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ current_soc < current_min }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_min_soc
+                data:
+                  value: "{{ current_soc }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ current_soc > current_max }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_max_soc
+                data:
+                  value: "{{ current_soc }}"
+
+  - id: 'sigenergy_track_export_earnings'
+    alias: "Sigenergy — Track Export Earnings"
+    description: "Accumulate export earnings every 5 minutes based on export delta and feed-in price"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') not in ['unknown','unavailable','none'] }}"
+    actions:
+      - variables:
+          current_export: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          prev_export: "{{ states('input_number.sigenergy_prev_lifetime_export') | float(0) }}"
+          feed_in_price: "{{ states('sensor.glenn_home_feed_in_price') | float(-999) }}"
+          export_delta: "{{ [(current_export - prev_export), 0] | max }}"
+          price_valid: "{{ feed_in_price != -999 and states('sensor.glenn_home_feed_in_price') not in ['unknown','unavailable','none',''] }}"
+          current_earnings: "{{ states('input_number.sigenergy_daily_export_earnings') | float(0) }}"
+          current_missing: "{{ states('input_number.sigenergy_daily_export_missing_price') | float(0) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ export_delta > 0 and price_valid }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_export_earnings
+                data:
+                  value: "{{ (current_earnings + (export_delta * feed_in_price)) | round(3) }}"
+          - conditions:
+              - condition: template
+                value_template: "{{ export_delta > 0 and not price_valid }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_daily_export_missing_price
+                data:
+                  value: "{{ (current_missing + export_delta) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_lifetime_export
+        data:
+          value: "{{ current_export }}"
+
+  - id: 'sigenergy_track_se_monthly_earnings'
+    alias: "Sigenergy — Track SolarEdge Monthly Earnings"
+    description: "Accumulate monthly earnings using SolarEdge grid meter (authoritative)"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') not in ['unknown','unavailable','none'] }}"
+    actions:
+      - variables:
+          current_se_export: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+          prev_se_export: "{{ states('input_number.sigenergy_prev_se_lifetime_export') | float(0) }}"
+          feed_in_price: "{{ states('sensor.glenn_home_feed_in_price') | float(-999) }}"
+          export_delta: "{{ [(current_se_export - prev_se_export), 0] | max }}"
+          price_valid: "{{ feed_in_price != -999 and states('sensor.glenn_home_feed_in_price') not in ['unknown','unavailable','none',''] }}"
+          current_monthly_kwh: "{{ states('input_number.sigenergy_monthly_se_export_kwh') | float(0) }}"
+          current_monthly_earnings: "{{ states('input_number.sigenergy_monthly_export_earnings') | float(0) }}"
+          current_monthly_missing: "{{ states('input_number.sigenergy_monthly_export_missing_price') | float(0) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ export_delta > 0 }}"
+            sequence:
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.sigenergy_monthly_se_export_kwh
+                data:
+                  value: "{{ (current_monthly_kwh + export_delta) | round(3) }}"
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ price_valid }}"
+                    sequence:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.sigenergy_monthly_export_earnings
+                        data:
+                          value: "{{ (current_monthly_earnings + (export_delta * feed_in_price)) | round(3) }}"
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ not price_valid }}"
+                    sequence:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.sigenergy_monthly_export_missing_price
+                        data:
+                          value: "{{ (current_monthly_missing + export_delta) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_se_lifetime_export
+        data:
+          value: "{{ current_se_export }}"
+
+  - id: 'sigenergy_reset_monthly_trackers'
+    alias: "Sigenergy — Reset Monthly Trackers"
+    description: "Reset monthly earnings trackers on the 1st of each month"
+    mode: single
+    triggers:
+      - trigger: time
+        at: "00:00:02"
+    conditions:
+      - condition: template
+        value_template: "{{ now().day == 1 }}"
+    actions:
+      - variables:
+          se_export: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_monthly_se_export_kwh
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_monthly_export_earnings
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_monthly_export_missing_price
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_month_start_se_export
+        data:
+          value: "{{ se_export }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_se_lifetime_export
+        data:
+          value: "{{ se_export }}"
+      - action: system_log.write
+        data:
+          message: "Sigenergy: Monthly trackers reset for new month"
+          level: info
+          logger: sigenergy.monthly
+
+  - id: 'sigenergy_reset_daily_trackers'
+    alias: "Sigenergy — Reset Daily Trackers at Midnight"
+    description: "Reset min/max SOC, earnings, and capture start-of-day values"
+    mode: single
+    triggers:
+      - trigger: time
+        at: "00:00:05"
+    actions:
+      - variables:
+          current_soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(50) }}"
+          se_export: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+          se_import: "{{ states('sensor.solaredge_i1_m1_ac_energy_imported') | float(0) }}"
+          sigen_export: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          sigen_import: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_min_soc
+        data:
+          value: "{{ current_soc }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_max_soc
+        data:
+          value: "{{ current_soc }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_export_earnings
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_daily_export_missing_price
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_prev_lifetime_export
+        data:
+          value: "{{ sigen_export }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_se_start_of_day_export
+        data:
+          value: "{{ se_export }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_se_start_of_day_import
+        data:
+          value: "{{ se_import }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_sigen_start_of_day_export
+        data:
+          value: "{{ sigen_export }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_sigen_start_of_day_import
+        data:
+          value: "{{ sigen_import }}"
+
+  - id: 'sigenergy_daily_summary_email'
+    alias: "Sigenergy — Daily Summary Email"
+    description: "Send comprehensive daily energy summary at midnight"
+    mode: single
+    triggers:
+      - trigger: time
+        at: "00:00:30"
+    actions:
+      - variables:
+          yesterday: "{{ (now() - timedelta(days=1)).strftime('%Y-%m-%d') }}"
+          yesterday_display: "{{ (now() - timedelta(days=1)).strftime('%d/%m/%Y') }}"
+          current_month: "{{ now().strftime('%B %Y') }}"
+          is_first_of_month: "{{ now().day == 1 }}"
+          grid_export: "{{ states('sensor.sigenergy_daily_grid_export') | float(0) | round(2) }}"
+          grid_import: "{{ states('sensor.sigenergy_daily_grid_import') | float(0) | round(2) }}"
+          battery_charge: "{{ states('sensor.sigenergy_daily_battery_charge') | float(0) | round(2) }}"
+          battery_discharge: "{{ states('sensor.sigenergy_daily_battery_discharge') | float(0) | round(2) }}"
+          pv_yield: "{{ states('sensor.sigenergy_daily_pv_yield') | float(0) | round(2) }}"
+          consumption: "{{ states('sensor.sigenergy_daily_consumption') | float(0) | round(2) }}"
+          soc_now: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
+          soc_min: "{{ states('input_number.sigenergy_daily_min_soc') | float(0) | round(1) }}"
+          soc_max: "{{ states('input_number.sigenergy_daily_max_soc') | float(0) | round(1) }}"
+          export_earnings: "{{ states('input_number.sigenergy_daily_export_earnings') | float(0) | round(2) }}"
+          export_missing: "{{ states('input_number.sigenergy_daily_export_missing_price') | float(0) | round(2) }}"
+          net_grid: "{{ (grid_export - grid_import) | round(2) }}"
+          net_grid_label: "{% if (grid_export - grid_import) >= 0 %}net export{% else %}net import{% endif %}"
+          se_export_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+          se_import_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_imported') | float(0) }}"
+          se_export_start: "{{ states('input_number.sigenergy_se_start_of_day_export') | float(0) }}"
+          se_import_start: "{{ states('input_number.sigenergy_se_start_of_day_import') | float(0) }}"
+          sigen_export_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          sigen_import_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
+          sigen_export_start: "{{ states('input_number.sigenergy_sigen_start_of_day_export') | float(0) }}"
+          sigen_import_start: "{{ states('input_number.sigenergy_sigen_start_of_day_import') | float(0) }}"
+          se_daily_export: "{{ (se_export_now - se_export_start) | round(2) }}"
+          se_daily_import: "{{ (se_import_now - se_import_start) | round(2) }}"
+          sigen_daily_export: "{{ (sigen_export_now - sigen_export_start) | round(2) }}"
+          sigen_daily_import: "{{ (sigen_import_now - sigen_import_start) | round(2) }}"
+          threshold_c: "{{ (states('input_number.sigenergy_export_threshold') | float(0.033) * 100) | round(1) }}"
+          monthly_kwh: "{{ states('input_number.sigenergy_monthly_se_export_kwh') | float(0) | round(1) }}"
+          monthly_earnings: "{{ states('input_number.sigenergy_monthly_export_earnings') | float(0) | round(2) }}"
+          monthly_missing: "{{ states('input_number.sigenergy_monthly_export_missing_price') | float(0) | round(2) }}"
+          monthly_avg_price: "{% if monthly_kwh > 0.1 %}{{ ((monthly_earnings / monthly_kwh) * 100) | round(1) }}{% else %}0{% endif %}"
+          prev_month: "{{ (now() - timedelta(days=1)).strftime('%B %Y') }}"
+      - action: notify.email_glenn_energy_summary
+        data:
+          title: "Daily energy summary — {{ yesterday_display }}"
+          message: |
+            DAILY ENERGY SUMMARY — {{ yesterday_display }}
+
+            == EXPORT EARNINGS SUMMARY (yesterday) ==
+            Exported (Sigenergy RM): {{ grid_export }} kWh
+            Estimated earnings (× Amber feed-in): ${{ export_earnings }}
+            Export missing price (excluded from $): {{ export_missing }} kWh
+
+            == MONTHLY ESTIMATE ({{ prev_month if is_first_of_month else current_month }} to date) ==
+            Total grid export (SolarEdge): {{ monthly_kwh }} kWh
+            Estimated monthly earnings: {{ monthly_avg_price }} c/kWh avg × {{ monthly_kwh }} kWh = ${{ monthly_earnings }}
+            Export missing price (excluded from $): {{ monthly_missing }} kWh
+            {% if is_first_of_month %}NOTE: This is the FINAL summary for {{ prev_month }}{% endif %}
+
+            == SIGENERGY RM (bucket sums) ==
+            Grid export: {{ grid_export }} kWh
+            Grid import: {{ grid_import }} kWh
+            House consumption: {{ consumption }} kWh
+            Battery charge: {{ battery_charge }} kWh
+            Battery discharge: {{ battery_discharge }} kWh
+            SoC min/max: {{ soc_min }}% / {{ soc_max }}%
+
+            == CROSS-CHECK (delta within the day window) ==
+            SolarEdge energy exported: {{ se_daily_export }} kWh
+            SolarEdge energy imported: {{ se_daily_import }} kWh
+            Sigenergy lifetime export delta: {{ sigen_daily_export }} kWh
+            Sigenergy lifetime import delta: {{ sigen_daily_import }} kWh
+
+            == SUMMARY ==
+            Net Grid: {{ net_grid }} kWh ({{ net_grid_label }})
+            Battery SOC now: {{ soc_now }}%
+          data:
+            html: |
+              <html><body style='margin:0;padding:0;background:#fff;'>
+              <div style='max-width:700px;margin:0 auto;padding:16px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;'>
+              
+              <h2 style='color:#1a73e8;margin-bottom:4px;'>Daily energy summary — {{ yesterday_display }}</h2>
+              <p style='color:#666;margin-top:0;margin-bottom:20px;'>Date (local): <strong>{{ yesterday_display }}</strong></p>
+              
+              <!-- Export Earnings Summary -->
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:16px 0;'>
+              <div style='background:#fff;padding:12px 16px;font-weight:700;font-size:15px;border-bottom:1px solid #dadce0;'>Export earnings summary (yesterday)</div>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;color:#111;'>
+              Exported (Sigenergy RM): <strong>{{ grid_export }}</strong> kWh<br>
+              Estimated earnings (× Amber feed-in): <strong>${{ export_earnings }}</strong><br>
+              Export missing price (excluded from $): <strong>{{ export_missing }}</strong> kWh<br>
+              <br>
+              <span style='color:#666;font-size:12px;'>Note: earnings uses accumulated feed-in price × export delta every 5 minutes.</span>
+              </div></div>
+              
+              <!-- Monthly Estimate -->
+              <div style='border:1px solid {% if is_first_of_month %}#137333{% else %}#dadce0{% endif %};border-radius:12px;overflow:hidden;margin:16px 0;'>
+              <div style='background:{% if is_first_of_month %}#E6F4EA{% else %}#fff{% endif %};padding:12px 16px;font-weight:700;font-size:15px;border-bottom:1px solid #dadce0;'>Monthly estimate ({{ prev_month if is_first_of_month else current_month }}{% if is_first_of_month %} — FINAL{% else %} to date{% endif %})</div>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;color:#111;'>
+              Total grid export (SolarEdge): <strong>{{ monthly_kwh }}</strong> kWh<br>
+              Estimated monthly earnings: <strong>{{ monthly_avg_price }} c/kWh</strong> avg × {{ monthly_kwh }} kWh = <strong>${{ monthly_earnings }}</strong><br>
+              Export missing price (excluded from $): <strong>{{ monthly_missing }}</strong> kWh
+              </div></div>
+              
+              <!-- Sigenergy RM (bucket sums) -->
+              <h3 style='color:#333;margin:24px 0 8px 0;font-size:16px;font-weight:600;'>Sigenergy RM (bucket sums)</h3>
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:0 0 16px 0;'>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;color:#111;'>
+              Grid export: <strong>{{ grid_export }}</strong> kWh<br>
+              Grid import: <strong>{{ grid_import }}</strong> kWh<br>
+              House consumption: <strong>{{ consumption }}</strong> kWh<br>
+              Battery charge: <strong>{{ battery_charge }}</strong> kWh<br>
+              Battery discharge: <strong>{{ battery_discharge }}</strong> kWh<br>
+              SoC min/max: <strong>{{ soc_min }}%</strong> / <strong>{{ soc_max }}%</strong>
+              </div></div>
+              
+              <!-- Cross-check -->
+              <h3 style='color:#333;margin:24px 0 8px 0;font-size:16px;font-weight:600;'>Cross-check (delta within the day window)</h3>
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:0 0 16px 0;'>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;color:#111;'>
+              SolarEdge energy exported: <strong>{{ se_daily_export }}</strong> kWh<br>
+              SolarEdge energy imported: <strong>{{ se_daily_import }}</strong> kWh<br>
+              Sigenergy lifetime export delta: <strong>{{ sigen_daily_export }}</strong> kWh<br>
+              Sigenergy lifetime import delta: <strong>{{ sigen_daily_import }}</strong> kWh
+              </div></div>
+              
+              <!-- Summary -->
+              <div style='border:1px solid #dadce0;border-radius:12px;overflow:hidden;margin:16px 0;'>
+              <div style='background:#E6F4EA;padding:10px 16px;font-weight:700;'>Summary</div>
+              <div style='padding:14px 16px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:13px;line-height:1.7;'>
+              Net Grid: <strong>{{ net_grid }} kWh</strong> ({{ net_grid_label }})<br>
+              Battery SOC now: <strong>{{ soc_now }}%</strong>
+              </div></div>
+              
+              <p style='color:#888;font-size:11px;margin-top:20px;'>Decision banners appear ONLY when crossing thresholds (export > {{ threshold_c }} c/kWh, grid-charge ≤ 0 c/kWh). This report describes energy flows for the completed day.</p>
+              
+              </div></body></html>
+
+  - id: 'sigenergy_master_off_safe_state'
+    alias: "Sigenergy — Master OFF: Force Safe State"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        to: "off"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_force_safe_state
+
+  - id: 'sigenergy_master_on_reevaluate'
+    alias: "Sigenergy — Master ON: Re-evaluate"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.sigenergy_master_enabled
+        to: "on"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_ensure_remote_ems
+      - delay:
+          seconds: 3
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_synchronize_state
+
+  - id: 'sigenergy_safety_low_battery'
+    alias: "Sigenergy — Safety: Low Battery (15%)"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.sigen_0_plant_battery_soc
+        below: 15
+        for:
+          minutes: 5
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_low_battery_notified
+        state: "off"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_disable_export
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.sigenergy_low_battery_notified
+      - action: notify.mobile_app_glenns_iphone
+        data:
+          title: "⚠️ Low Battery (15%)"
+          message: "SOC: {{ states('sensor.sigen_0_plant_battery_soc') }}%. Export disabled."
+
+  - id: 'sigenergy_safety_critical_battery'
+    alias: "Sigenergy — Safety: Critical Battery (5%)"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.sigen_0_plant_battery_soc
+        below: 5
+        for:
+          minutes: 2
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_critical_battery_notified
+        state: "off"
+    actions:
+      - action: script.turn_on
+        target:
+          entity_id: script.sigenergy_force_safe_state
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.sigenergy_critical_battery_notified
+      - action: notify.mobile_app_glenns_iphone
+        data:
+          title: "🚨 Critical Battery (5%)"
+          message: "SOC: {{ states('sensor.sigen_0_plant_battery_soc') }}%. Safe state activated."
+
+  - id: 'sigenergy_reset_low_battery_notified'
+    alias: "Sigenergy — Reset Low Battery Notified"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.sigen_0_plant_battery_soc
+        above: 20
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_low_battery_notified
+        state: "on"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.sigenergy_low_battery_notified
+
+  - id: 'sigenergy_reset_critical_battery_notified'
+    alias: "Sigenergy — Reset Critical Battery Notified"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.sigen_0_plant_battery_soc
+        above: 10
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sigenergy_critical_battery_notified
+        state: "on"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.sigenergy_critical_battery_notified
+
+  - id: 'sigenergy_guard_export_limit'
+    alias: "Sigenergy — Guard: Clamp Export Limit"
+    mode: restart
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+      - trigger: state
+        entity_id: number.sigen_0_plant_grid_max_export_limit
+    actions:
+      - variables:
+          current: "{{ states('number.sigen_0_plant_grid_max_export_limit') | float(0) }}"
+          max_allowed: "{{ states('input_number.sigenergy_export_limit_kw') | float(5) }}"
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ current > max_allowed }}"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sigen_0_plant_grid_max_export_limit
+                data:
+                  value: "{{ max_allowed }}"
+
+  - id: 'sigenergy_reserve_monitoring_30min'
+    alias: "Sigenergy — Reserve Monitoring (30 min blocks)"
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/30"
+        seconds: "10"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.sigen_0_plant_battery_soc') not in ['unknown','unavailable','none'] }}"
+    actions:
+      - variables:
+          soc: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) }}"
+          avail_kwh_reported: "{{ states('sensor.sigen_0_inverter_1_available_battery_discharge_energy') | float(0) }}"
+          t_imp: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
+          t_exp: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          t_house: "{{ states('sensor.sigen_0_lifetime_consumed_energy') | float(0) }}"
+          t_dis: "{{ states('sensor.sigen_0_accumulated_discharge_energy') | float(0) }}"
+          t_chg: "{{ states('sensor.sigen_0_accumulated_charge_energy') | float(0) }}"
+          p_imp: "{{ states('input_number.sigenergy_rm_prev_grid_import_kwh') | float(0) }}"
+          p_exp: "{{ states('input_number.sigenergy_rm_prev_grid_export_kwh') | float(0) }}"
+          p_house: "{{ states('input_number.sigenergy_rm_prev_house_consumption_kwh') | float(0) }}"
+          p_dis: "{{ states('input_number.sigenergy_rm_prev_battery_discharge_kwh') | float(0) }}"
+          p_chg: "{{ states('input_number.sigenergy_rm_prev_battery_charge_kwh') | float(0) }}"
+          d_imp: "{% if p_imp <= 0 or t_imp < p_imp %} 0 {% else %} {{ (t_imp - p_imp) }} {% endif %}"
+          d_exp: "{% if p_exp <= 0 or t_exp < p_exp %} 0 {% else %} {{ (t_exp - p_exp) }} {% endif %}"
+          d_house: "{% if p_house <= 0 or t_house < p_house %} 0 {% else %} {{ (t_house - p_house) }} {% endif %}"
+          d_dis: "{% if p_dis <= 0 or t_dis < p_dis %} 0 {% else %} {{ (t_dis - p_dis) }} {% endif %}"
+          d_chg: "{% if p_chg <= 0 or t_chg < p_chg %} 0 {% else %} {{ (t_chg - p_chg) }} {% endif %}"
+          avail_kwh: "{% if avail_kwh_reported > 0 %} {{ avail_kwh_reported }} {% else %} 0 {% endif %}"
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.sigenergy_rm_block_timestamp
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_block_soc
+        data:
+          value: "{{ soc | round(1) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_block_battery_available_kwh
+        data:
+          value: "{{ avail_kwh | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_block_grid_import_kwh
+        data:
+          value: "{{ d_imp | float(0) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_block_grid_export_kwh
+        data:
+          value: "{{ d_exp | float(0) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_block_house_consumption_kwh
+        data:
+          value: "{{ d_house | float(0) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_block_battery_discharge_kwh
+        data:
+          value: "{{ d_dis | float(0) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_block_battery_charge_kwh
+        data:
+          value: "{{ d_chg | float(0) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_grid_import_kwh
+        data:
+          value: "{{ t_imp | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_grid_export_kwh
+        data:
+          value: "{{ t_exp | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_house_consumption_kwh
+        data:
+          value: "{{ t_house | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_battery_discharge_kwh
+        data:
+          value: "{{ t_dis | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_battery_charge_kwh
+        data:
+          value: "{{ t_chg | round(3) }}"
+
+  - id: 'sigenergy_reserve_monitoring_init'
+    alias: "Sigenergy — Reserve Monitoring (init prev totals)"
+    mode: single
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: time
+        at: "00:00:10"
+    conditions:
+      - condition: template
+        value_template: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') not in ['unknown','unavailable','none'] }}"
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_grid_import_kwh
+        data:
+          value: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_grid_export_kwh
+        data:
+          value: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_house_consumption_kwh
+        data:
+          value: "{{ states('sensor.sigen_0_lifetime_consumed_energy') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_battery_discharge_kwh
+        data:
+          value: "{{ states('sensor.sigen_0_accumulated_discharge_energy') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_rm_prev_battery_charge_kwh
+        data:
+          value: "{{ states('sensor.sigen_0_accumulated_charge_energy') | float(0) }}"

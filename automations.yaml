@@ -1,0 +1,120 @@
+# =============================================================================
+# HOME ASSISTANT AUTOMATIONS
+# =============================================================================
+# File: automations.yaml
+# Revision: 6.0
+# Last Updated: 2026-01-31
+#
+# Kitchen and Dining automations are in: packages/scene_switches.yaml
+# Sigenergy/Amber automations are in: packages/sigenergy.yaml
+#
+# CHANGELOG (v6.0):
+#   - Removed "Energy — Daily Amber delay + grid export summary (email)"
+#     (id: 1768807954725). This UI-created automation referenced
+#     non-existent PostgreSQL/Riemann sensors and sent a broken 6:30 AM
+#     email. The midnight summary in packages/sigenergy.yaml handles
+#     daily reporting.
+# =============================================================================
+
+- id: '1757753649313'
+  alias: Luyen is Home
+  description: ''
+  triggers:
+    - entity_id:
+        - person.luyen
+      to: home
+      trigger: state
+  conditions: []
+  actions:
+    - action: notify.mobile_app_glenn_s_iphone_15_pro
+      data:
+        title: Luyen Tracking
+        message: Luyen is home
+  mode: single
+
+- id: '1757755104316'
+  alias: Luyen has left
+  description: ''
+  triggers:
+    - entity_id:
+        - person.luyen
+      from: home
+      trigger: state
+  conditions: []
+  actions:
+    - action: notify.mobile_app_glenn_s_iphone_15_pro
+      data:
+        title: Luyen Tracking
+        message: Luyen has left
+  mode: single
+
+- id: '1757797917654'
+  alias: "Garage \u2013 Driveway snapshot (webhook)"
+  description: ''
+  triggers:
+    - trigger: webhook
+      allowed_methods:
+        - POST
+        - PUT
+      local_only: true
+      webhook_id: driveway-motion-mqtt
+  conditions: []
+  actions:
+    - action: notify.mobile_app_glenn_s_iphone_15_pro
+      metadata: {}
+      data:
+        message: Movement in driveway
+        title: Movement detected
+        data:
+          entity_id: camera.driveway
+  mode: single
+
+- id: '1758005044168'
+  alias: "Mobile action \u2192 Close Garage"
+  description: ''
+  triggers:
+    - event_type: ios.notification_action_fired
+      event_data:
+        actionName: CLOSE_GARAGE
+      trigger: event
+  conditions: []
+  actions:
+    - action: script.garage_close_now
+      data: {}
+  mode: single
+
+- id: '1759040963334'
+  alias: "Master Bedroom Switch \u2192 Toggle Blinds"
+  description: ''
+  triggers:
+    - trigger: mqtt
+      topic: zigbee2mqtt/Master Bedroom Blinds Switch
+  conditions:
+    - condition: template
+      value_template: >-
+        {{ trigger.payload_json is defined
+           and 'action' in trigger.payload_json
+           and trigger.payload_json.action not in [none, '', 'null'] }}
+  actions:
+    - choose:
+        - conditions:
+            - condition: numeric_state
+              entity_id: cover.master_bedroom_left_blind
+              attribute: current_position
+              above: 50
+          sequence:
+            - action: cover.close_cover
+              target:
+                entity_id:
+                  - cover.master_bedroom_left_blind
+                  - cover.master_bedroom_right_blind
+              data: {}
+      default:
+        - action: cover.set_cover_position
+          target:
+            entity_id:
+              - cover.master_bedroom_left_blind
+              - cover.master_bedroom_right_blind
+          data:
+            position: 100
+  mode: single

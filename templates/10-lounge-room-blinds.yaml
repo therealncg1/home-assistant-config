@@ -1,0 +1,56 @@
+- cover:
+    - name: Lounge Room Blinds
+      unique_id: lounge_room_blinds
+      device_class: blind
+      default_entity_id: cover.lounge_room_blinds
+
+      availability: >-
+        {{ not is_state('cover.lounge_room_left_blind','unavailable')
+           and not is_state('cover.lounge_room_right_blind','unavailable')
+           and not is_state('cover.lounge_room_door_blind','unavailable') }}
+
+      position: >-
+        {% set vals = [
+          state_attr('cover.lounge_room_left_blind',  'current_position'),
+          state_attr('cover.lounge_room_right_blind', 'current_position'),
+          state_attr('cover.lounge_room_door_blind',  'current_position')
+        ] | select('number') | list %}
+        {% if vals | count == 0 %}
+          0
+        {% else %}
+          {{ (vals | sum / (vals | count)) | round(0) }}
+        {% endif %}
+
+      open_cover:
+        - action: cover.open_cover
+          target:
+            entity_id:
+              - cover.lounge_room_left_blind
+              - cover.lounge_room_right_blind
+              - cover.lounge_room_door_blind
+
+      close_cover:
+        - action: cover.close_cover
+          target:
+            entity_id:
+              - cover.lounge_room_left_blind
+              - cover.lounge_room_right_blind
+              - cover.lounge_room_door_blind
+
+      stop_cover:
+        - action: cover.stop_cover
+          target:
+            entity_id:
+              - cover.lounge_room_left_blind
+              - cover.lounge_room_right_blind
+              - cover.lounge_room_door_blind
+
+      set_cover_position:
+        - action: cover.set_cover_position
+          target:
+            entity_id:
+              - cover.lounge_room_left_blind
+              - cover.lounge_room_right_blind
+              - cover.lounge_room_door_blind
+          data:
+            position: "{{ position | int }}"

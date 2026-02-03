@@ -1,0 +1,196 @@
+# =============================================================================
+# HOME ASSISTANT CONFIGURATION
+# =============================================================================
+# File: configuration.yaml
+# Revision: 2.2
+# Last Updated: 2026-01-31
+# Changes: Moved recorder db_url and all Hubitat API tokens to secrets.yaml
+# =============================================================================
+
+# ========== Core ==========
+default_config:
+
+# ========== Packages ==========
+# All Sigenergy/Amber energy management is now in packages/
+homeassistant:
+  packages: !include_dir_named packages/
+
+tts:
+  - platform: google_translate
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+# Templates are now split into multiple files (see /config/templates/)
+# NOTE: Sigenergy/Amber templates have been moved to packages/sigenergy.yaml
+# Delete amber_*.yaml and sigenergy_*.yaml from /config/templates/ after migration
+template: !include_dir_merge_list templates
+
+# ========== Recorder ==========
+recorder:
+  purge_keep_days: 365
+  commit_interval: 3
+  db_url: !secret recorder_db_url
+
+# ========== HTTP ==========
+http:
+  server_port: 31111
+
+# ========== Modbus (SolarEdge) ==========
+modbus:
+  - name: solaredge
+    type: tcp
+    host: 192.168.1.7
+    port: 1502
+    sensors:
+      - name: Export Limit (W)
+        address: 40177
+        data_type: uint16
+        unit_of_measurement: "W"
+        scan_interval: 30
+      - name: Export Limit Enabled Flag
+        address: 40178
+        data_type: uint16
+        unit_of_measurement: ""
+        scan_interval: 30
+      - name: Max AC Power Limit (W)
+        address: 40092
+        data_type: uint16
+        unit_of_measurement: "W"
+        scan_interval: 30
+      - name: Active Power Limit (%)
+        address: 40086
+        data_type: uint16
+        unit_of_measurement: "%"
+        scan_interval: 30
+
+# ========== REST Commands ==========
+rest_command:
+  # -------------------------------
+  # Hubitat Maker API (App 190)
+  # All URLs stored in secrets.yaml (tokens hidden)
+  # -------------------------------
+
+  hubitat_read_device: # debug/verification
+    url: !secret hubitat_api_device_url
+    method: get
+    timeout: 10
+
+  hubitat_on: # generic ON via POST JSON
+    url: !secret hubitat_api_device_url
+    method: post
+    content_type: "application/json"
+    payload: >
+      {"command":"on"}
+    timeout: 10
+
+  hubitat_off: # generic OFF via POST JSON
+    url: !secret hubitat_api_device_url
+    method: post
+    content_type: "application/json"
+    payload: >
+      {"command":"off"}
+    timeout: 10
+
+  hubitat_set_level: # setLevel(level[, durationSeconds])
+    url: !secret hubitat_api_device_url
+    method: post
+    content_type: "application/json"
+    payload: >
+      {% if duration is defined %}
+      {"command":"setLevel","value":{{ level|int }},"secondaryValue":{{ duration|int }}}
+      {% else %}
+      {"command":"setLevel","value":{{ level|int }}}
+      {% endif %}
+    timeout: 10
+
+  hubitat_set_ct: # setColorTemperature(kelvin[, level[, durationSeconds]])
+    url: !secret hubitat_api_device_url
+    method: post
+    content_type: "application/json"
+    payload: >
+      {% if level is defined and duration is defined %}
+      {"command":"setColorTemperature","value":{{ kelvin|int }},"secondaryValue":{{ level|int }},"thirdValue":{{ duration|int }}}
+      {% elif level is defined %}
+      {"command":"setColorTemperature","value":{{ kelvin|int }},"secondaryValue":{{ level|int }}}
+      {% else %}
+      {"command":"setColorTemperature","value":{{ kelvin|int }}}
+      {% endif %}
+    timeout: 10
+
+  garage_close_now: # garage momentary (device 118)
+    url: !secret hubitat_garage_close_url
+    method: post
+    content_type: "application/json"
+    payload: >
+      {"command":"on"}
+    timeout: 10
+
+  # -------------------------------
+  # Kitchen Ceiling Light mirror VSWs (path-style GET)
+  # Main = device 147, Ring = device 148
+  # -------------------------------
+  hubitat_vsw_main_on:
+    url: !secret hubitat_vsw_main_on_url
+    method: get
+    timeout: 10
+
+  hubitat_vsw_main_off:
+    url: !secret hubitat_vsw_main_off_url
+    method: get
+    timeout: 10
+
+  hubitat_vsw_ring_on:
+    url: !secret hubitat_vsw_ring_on_url
+    method: get
+    timeout: 10
+
+  hubitat_vsw_ring_off:
+    url: !secret hubitat_vsw_ring_off_url
+    method: get
+    timeout: 10
+
+  # -------------------------------
+  # Hubitat Group OFF/ON
+  # Kitchen Downlights = 149, Lounge Downlights = 121
+  # -------------------------------
+  hubitat_kitchen_downlights_on:
+    url: !secret hubitat_kitchen_dl_on_url
+    method: get
+    timeout: 10
+  hubitat_kitchen_downlights_off:
+    url: !secret hubitat_kitchen_dl_off_url
+    method: get
+    timeout: 10
+  hubitat_lounge_downlights_on:
+    url: !secret hubitat_lounge_dl_on_url
+    method: get
+    timeout: 10
+  hubitat_lounge_downlights_off:
+    url: !secret hubitat_lounge_dl_off_url
+    method: get
+    timeout: 10
+
+  # -------------------------------
+  # Hubitat Rule Machine (App 192) — smooth fades
+  # -------------------------------
+  hubitat_movie_time_fade_downlights_endpoint:
+    url: !secret hubitat_movie_fade_url
+    method: get
+    timeout: 10
+
+# ========== Notify (Email) ==========
+notify:
+  - platform: smtp
+    name: email_glenn_energy_summary
+    server: !secret smtp_server
+    port: !secret smtp_port
+    timeout: 15
+    sender: !secret smtp_sender
+    encryption: starttls
+    username: !secret smtp_username
+    password: !secret smtp_password
+    recipient:
+      - !secret smtp_recipient
+    sender_name: "Home Assistant"
