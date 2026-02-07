@@ -2,8 +2,25 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 4.0
-# Last Updated: 2026-02-07
+# Revision: 4.0.3
+# Last Updated: 2026-02-08
+#
+# CHANGES IN 4.0.3:
+#   - FIX: Removed initial: 0 from persistent helpers (monthly_export_earnings,
+#     prev_feed_in_price, prev_import_price) — initial: overrides stored values
+#     on every restart, wiping accumulated data
+#   - Kept initial: 0 on daily/yesterday helpers (reset at midnight anyway)
+#   - Added monthly_earnings_corrupted detection to startup recovery
+#     (catches .storage corruption defaulting to min: -1000)
+#
+# CHANGES IN 4.0.2:
+#   - FIX: Added initial: 0 to daily/yesterday helpers with negative min values
+#     (daily_export_earnings, daily_export_missing_price,
+#     yesterday_export_earnings) — prevents negative display after restarts
+#
+# CHANGES IN 4.0.1:
+#   - FIX: Moved AEMO numeric sensors (Wholesale, Margin, Forecast) from
+#     binary_sensor to sensor block (state_class invalid on binary_sensor)
 #
 # CHANGES IN 4.0:
 #   - Added AEMO NEM wholesale price comparison sensors
@@ -532,6 +549,7 @@ input_number:
     step: 0.001
     unit_of_measurement: "$"
     mode: box
+    initial: 0
 
   sigenergy_daily_export_missing_price:
     name: "Sigenergy — Daily Export Missing Price kWh"
@@ -541,6 +559,7 @@ input_number:
     step: 0.001
     unit_of_measurement: "kWh"
     mode: box
+    initial: 0
 
   sigenergy_prev_lifetime_export:
     name: "Sigenergy — Previous Lifetime Export"
@@ -668,6 +687,7 @@ input_number:
     step: 0.001
     unit_of_measurement: "$"
     mode: box
+    initial: 0
 
   sigenergy_yesterday_export_missing_price:
     name: "Sigenergy — Yesterday Export Missing Price"
@@ -919,6 +939,46 @@ template:
             No exports this month
           {% endif %}
 
+      # --- AEMO NEM WHOLESALE PRICE COMPARISON SENSORS (v4.0) ---
+      - name: "AEMO VIC1 Wholesale c/kWh"
+        unique_id: aemo_vic1_wholesale_c_kwh
+        unit_of_measurement: "c/kWh"
+        state_class: measurement
+        icon: mdi:transmission-tower
+        state: >
+          {{ (states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100) | round(2) }}
+        availability: >
+          {{ states('sensor.aemo_nem_vic1_current_5min_period_price') | is_number }}
+
+      - name: "Amber Feed-in Margin"
+        unique_id: amber_feedin_margin
+        unit_of_measurement: "c/kWh"
+        state_class: measurement
+        icon: mdi:cash-minus
+        state: >
+          {% set aemo = states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100 %}
+          {% set amber = states('sensor.glenn_home_feed_in_price') | float(0) * 100 %}
+          {{ (aemo - amber) | round(2) }}
+        availability: >
+          {{ states('sensor.aemo_nem_vic1_current_5min_period_price') | is_number and
+             states('sensor.glenn_home_feed_in_price') | is_number }}
+        attributes:
+          aemo_wholesale_c: >
+            {{ (states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100) | round(2) }}
+          amber_feedin_c: >
+            {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(2) }}
+          explanation: "Positive = Amber's margin, Negative = Amber pays above wholesale"
+
+      - name: "AEMO VIC1 30min Forecast c/kWh"
+        unique_id: aemo_vic1_30min_forecast_c_kwh
+        unit_of_measurement: "c/kWh"
+        state_class: measurement
+        icon: mdi:crystal-ball
+        state: >
+          {{ (states('sensor.aemo_nem_vic1_current_30min_forecast') | float(0) * 100) | round(2) }}
+        availability: >
+          {{ states('sensor.aemo_nem_vic1_current_30min_forecast') | is_number }}
+
   - binary_sensor:
       - name: "Sigenergy — Remote EMS Active"
         unique_id: sigenergy_remote_ems_active
@@ -974,46 +1034,6 @@ template:
         icon: mdi:alert
         state: >
           {{ not states('sensor.sigenergy_state_mismatch').startswith('No') }}
-
-      # --- AEMO NEM WHOLESALE PRICE COMPARISON SENSORS (v4.0) ---
-      - name: "AEMO VIC1 Wholesale c/kWh"
-        unique_id: aemo_vic1_wholesale_c_kwh
-        unit_of_measurement: "c/kWh"
-        state_class: measurement
-        icon: mdi:transmission-tower
-        state: >
-          {{ (states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100) | round(2) }}
-        availability: >
-          {{ states('sensor.aemo_nem_vic1_current_5min_period_price') | is_number }}
-
-      - name: "Amber Feed-in Margin"
-        unique_id: amber_feedin_margin
-        unit_of_measurement: "c/kWh"
-        state_class: measurement
-        icon: mdi:cash-minus
-        state: >
-          {% set aemo = states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100 %}
-          {% set amber = states('sensor.glenn_home_feed_in_price') | float(0) * 100 %}
-          {{ (aemo - amber) | round(2) }}
-        availability: >
-          {{ states('sensor.aemo_nem_vic1_current_5min_period_price') | is_number and
-             states('sensor.glenn_home_feed_in_price') | is_number }}
-        attributes:
-          aemo_wholesale_c: >
-            {{ (states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100) | round(2) }}
-          amber_feedin_c: >
-            {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(2) }}
-          explanation: "Positive = Amber's margin, Negative = Amber pays above wholesale"
-
-      - name: "AEMO VIC1 30min Forecast c/kWh"
-        unique_id: aemo_vic1_30min_forecast_c_kwh
-        unit_of_measurement: "c/kWh"
-        state_class: measurement
-        icon: mdi:crystal-ball
-        state: >
-          {{ (states('sensor.aemo_nem_vic1_current_30min_forecast') | float(0) * 100) | round(2) }}
-        availability: >
-          {{ states('sensor.aemo_nem_vic1_current_30min_forecast') | is_number }}
 
       - name: "AEMO Above Export Threshold"
         unique_id: aemo_above_export_threshold
@@ -1663,8 +1683,9 @@ automation:
           soc_reset: "{{ states('input_number.sigenergy_min_soc_hour_18') | float(0) == 0 }}"
           se_prev_reset: "{{ states('input_number.sigenergy_prev_se_lifetime_export') | float(0) == 0 }}"
           month_start_reset: "{{ states('input_number.sigenergy_month_start_se_export') | float(0) == 0 }}"
+          monthly_earnings_corrupted: "{{ states('input_number.sigenergy_monthly_export_earnings') | float(0) == -1000 }}"
           current_se_export: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
-          needs_recovery: "{{ master_off or threshold_reset or limit_reset or soc_reset or se_prev_reset or month_start_reset }}"
+          needs_recovery: "{{ master_off or threshold_reset or limit_reset or soc_reset or se_prev_reset or month_start_reset or monthly_earnings_corrupted }}"
       - choose:
           - conditions:
               - condition: template
@@ -1679,7 +1700,8 @@ automation:
                     Limit reset: {{ limit_reset }}, 
                     SOC reset: {{ soc_reset }},
                     SE prev reset: {{ se_prev_reset }},
-                    Month start reset: {{ month_start_reset }}
+                    Month start reset: {{ month_start_reset }},
+                    Monthly earnings corrupted: {{ monthly_earnings_corrupted }}
                   level: warning
                   logger: sigenergy.startup
               - choose:
@@ -1718,6 +1740,16 @@ automation:
                       - action: script.turn_on
                         target:
                           entity_id: script.sigenergy_set_conservative_soc_schedule
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ monthly_earnings_corrupted }}"
+                    sequence:
+                      - action: input_number.set_value
+                        target:
+                          entity_id: input_number.sigenergy_monthly_export_earnings
+                        data:
+                          value: 0
               - action: persistent_notification.create
                 data:
                   title: "Sigenergy: Startup Recovery"
@@ -1729,6 +1761,7 @@ automation:
                     {% if soc_reset %}• SOC schedule → Conservative{% endif %}
                     {% if se_prev_reset %}• SE prev lifetime → {{ current_se_export }} kWh{% endif %}
                     {% if month_start_reset %}• Month start baseline → {{ current_se_export }} kWh{% endif %}
+                    {% if monthly_earnings_corrupted %}• Monthly earnings → $0 (was corrupted to -$1000){% endif %}
                   notification_id: sigenergy_startup_recovery
       - choose:
           - conditions:
