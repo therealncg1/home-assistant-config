@@ -2,9 +2,23 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 3.8.5
-# Last Updated: 2026-02-03 (v3.8.5)
+# Revision: 4.0
+# Last Updated: 2026-02-07
 #
+# CHANGES IN 4.0:
+#   - Added AEMO NEM wholesale price comparison sensors
+#   - New sensors: AEMO VIC1 Wholesale c/kWh, Amber Feed-in Margin, AEMO Forecast
+#   - CRITICAL FIX: Daily email now captures yesterday's values at 23:59:55
+#     BEFORE utility meters reset at midnight (was showing all zeros)
+#   - Email time changed from 00:00:30 to 06:30 AM for more useful delivery
+#   - New input_numbers for "yesterday" values storage
+#   - New automation: "Capture Yesterday Values" at 23:59:55
+#
+# CHANGES IN 3.9:
+#   - Export threshold raised from 3.3c to 6c (0.06) based on data analysis
+#   - Overnight SOC minimums raised ~5% to protect battery and avoid grid imports
+#   - Goal: Better overnight reserves while still capturing good export prices
+#   - Data analysis: 6c threshold captures 81.8% of export value with 33.4% of periods
 #
 # CHANGES IN 3.8.5:
 #   - Added input_boolean.sigenergy_immediate_notifications_enabled (default: off)
@@ -134,7 +148,7 @@ input_number:
     step: 0.001
     unit_of_measurement: "$/kWh"
     mode: box
-    initial: 0.033
+    initial: 0.06
 
   sigenergy_export_limit_kw:
     name: "Sigenergy — Export Limit (kW)"
@@ -173,7 +187,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 25
+    initial: 32
 
   sigenergy_min_soc_hour_01:
     name: "Sigenergy — Min SOC 01:00"
@@ -183,7 +197,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 25
+    initial: 28
 
   sigenergy_min_soc_hour_02:
     name: "Sigenergy — Min SOC 02:00"
@@ -193,7 +207,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 20
+    initial: 25
 
   sigenergy_min_soc_hour_03:
     name: "Sigenergy — Min SOC 03:00"
@@ -203,7 +217,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 20
+    initial: 22
 
   sigenergy_min_soc_hour_04:
     name: "Sigenergy — Min SOC 04:00"
@@ -213,7 +227,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 15
+    initial: 20
 
   sigenergy_min_soc_hour_05:
     name: "Sigenergy — Min SOC 05:00"
@@ -223,7 +237,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 15
+    initial: 18
 
   sigenergy_min_soc_hour_06:
     name: "Sigenergy — Min SOC 06:00"
@@ -233,7 +247,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 10
+    initial: 15
 
   sigenergy_min_soc_hour_07:
     name: "Sigenergy — Min SOC 07:00"
@@ -243,7 +257,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 10
+    initial: 15
 
   sigenergy_min_soc_hour_08:
     name: "Sigenergy — Min SOC 08:00"
@@ -253,7 +267,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 10
+    initial: 15
 
   sigenergy_min_soc_hour_09:
     name: "Sigenergy — Min SOC 09:00"
@@ -263,7 +277,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 10
+    initial: 15
 
   sigenergy_min_soc_hour_10:
     name: "Sigenergy — Min SOC 10:00"
@@ -273,7 +287,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 10
+    initial: 20
 
   sigenergy_min_soc_hour_11:
     name: "Sigenergy — Min SOC 11:00"
@@ -383,7 +397,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 40
+    initial: 45
 
   sigenergy_min_soc_hour_22:
     name: "Sigenergy — Min SOC 22:00"
@@ -393,7 +407,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 35
+    initial: 40
 
   sigenergy_min_soc_hour_23:
     name: "Sigenergy — Min SOC 23:00"
@@ -403,7 +417,7 @@ input_number:
     step: 1
     unit_of_measurement: "%"
     mode: box
-    initial: 30
+    initial: 35
 
   # RESERVE MONITORING HELPERS
   sigenergy_rm_block_soc:
@@ -569,6 +583,133 @@ input_number:
     icon: mdi:battery-arrow-down
     min: 0
     max: 10000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  # --- YESTERDAY'S FINAL VALUES (v4.0) - captured at 23:59:55 before midnight reset ---
+  sigenergy_yesterday_grid_export:
+    name: "Sigenergy — Yesterday Grid Export"
+    icon: mdi:transmission-tower-export
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_grid_import:
+    name: "Sigenergy — Yesterday Grid Import"
+    icon: mdi:transmission-tower-import
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_consumption:
+    name: "Sigenergy — Yesterday Consumption"
+    icon: mdi:home-lightning-bolt
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_battery_charge:
+    name: "Sigenergy — Yesterday Battery Charge"
+    icon: mdi:battery-charging
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_battery_discharge:
+    name: "Sigenergy — Yesterday Battery Discharge"
+    icon: mdi:battery-arrow-down
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_pv_yield:
+    name: "Sigenergy — Yesterday PV Yield"
+    icon: mdi:solar-power
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_min_soc:
+    name: "Sigenergy — Yesterday Min SOC"
+    icon: mdi:battery-low
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+    mode: box
+
+  sigenergy_yesterday_max_soc:
+    name: "Sigenergy — Yesterday Max SOC"
+    icon: mdi:battery-high
+    min: 0
+    max: 100
+    step: 0.1
+    unit_of_measurement: "%"
+    mode: box
+
+  sigenergy_yesterday_export_earnings:
+    name: "Sigenergy — Yesterday Export Earnings"
+    icon: mdi:cash-check
+    min: -100
+    max: 1000
+    step: 0.001
+    unit_of_measurement: "$"
+    mode: box
+
+  sigenergy_yesterday_export_missing_price:
+    name: "Sigenergy — Yesterday Export Missing Price"
+    icon: mdi:alert-circle-outline
+    min: 0
+    max: 1000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_se_export_delta:
+    name: "Sigenergy — Yesterday SE Export Delta"
+    icon: mdi:delta
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_se_import_delta:
+    name: "Sigenergy — Yesterday SE Import Delta"
+    icon: mdi:delta
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_sigen_export_delta:
+    name: "Sigenergy — Yesterday Sigen Export Delta"
+    icon: mdi:delta
+    min: 0
+    max: 10000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sigenergy_yesterday_sigen_import_delta:
+    name: "Sigenergy — Yesterday Sigen Import Delta"
+    icon: mdi:delta
+    min: 0
+    max: 10000
     step: 0.001
     unit_of_measurement: "kWh"
     mode: box
@@ -833,6 +974,56 @@ template:
         icon: mdi:alert
         state: >
           {{ not states('sensor.sigenergy_state_mismatch').startswith('No') }}
+
+      # --- AEMO NEM WHOLESALE PRICE COMPARISON SENSORS (v4.0) ---
+      - name: "AEMO VIC1 Wholesale c/kWh"
+        unique_id: aemo_vic1_wholesale_c_kwh
+        unit_of_measurement: "c/kWh"
+        state_class: measurement
+        icon: mdi:transmission-tower
+        state: >
+          {{ (states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100) | round(2) }}
+        availability: >
+          {{ states('sensor.aemo_nem_vic1_current_5min_period_price') | is_number }}
+
+      - name: "Amber Feed-in Margin"
+        unique_id: amber_feedin_margin
+        unit_of_measurement: "c/kWh"
+        state_class: measurement
+        icon: mdi:cash-minus
+        state: >
+          {% set aemo = states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100 %}
+          {% set amber = states('sensor.glenn_home_feed_in_price') | float(0) * 100 %}
+          {{ (aemo - amber) | round(2) }}
+        availability: >
+          {{ states('sensor.aemo_nem_vic1_current_5min_period_price') | is_number and
+             states('sensor.glenn_home_feed_in_price') | is_number }}
+        attributes:
+          aemo_wholesale_c: >
+            {{ (states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100) | round(2) }}
+          amber_feedin_c: >
+            {{ (states('sensor.glenn_home_feed_in_price') | float(0) * 100) | round(2) }}
+          explanation: "Positive = Amber's margin, Negative = Amber pays above wholesale"
+
+      - name: "AEMO VIC1 30min Forecast c/kWh"
+        unique_id: aemo_vic1_30min_forecast_c_kwh
+        unit_of_measurement: "c/kWh"
+        state_class: measurement
+        icon: mdi:crystal-ball
+        state: >
+          {{ (states('sensor.aemo_nem_vic1_current_30min_forecast') | float(0) * 100) | round(2) }}
+        availability: >
+          {{ states('sensor.aemo_nem_vic1_current_30min_forecast') | is_number }}
+
+      - name: "AEMO Above Export Threshold"
+        unique_id: aemo_above_export_threshold
+        icon: mdi:export
+        state: >
+          {% set aemo_c = states('sensor.aemo_nem_vic1_current_5min_period_price') | float(0) * 100 %}
+          {% set threshold_c = states('input_number.sigenergy_export_threshold') | float(0.06) * 100 %}
+          {{ aemo_c >= threshold_c }}
+        availability: >
+          {{ states('sensor.aemo_nem_vic1_current_5min_period_price') | is_number }}
 
 # =============================================================================
 # SCRIPTS
@@ -1266,42 +1457,42 @@ script:
         target:
           entity_id: input_number.sigenergy_min_soc_hour_00
         data:
-          value: 28
+          value: 32
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_01
         data:
-          value: 25
+          value: 28
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_02
         data:
-          value: 22
+          value: 25
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_03
         data:
-          value: 19
+          value: 22
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_04
         data:
-          value: 16
+          value: 20
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_05
         data:
-          value: 13
+          value: 18
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_06
         data:
-          value: 10
+          value: 15
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_07
         data:
-          value: 10
+          value: 15
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_08
@@ -1371,22 +1562,22 @@ script:
         target:
           entity_id: input_number.sigenergy_min_soc_hour_21
         data:
-          value: 40
+          value: 45
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_22
         data:
-          value: 35
+          value: 40
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_min_soc_hour_23
         data:
-          value: 30
+          value: 35
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_export_threshold
         data:
-          value: 0.033
+          value: 0.06
       - action: input_number.set_value
         target:
           entity_id: input_number.sigenergy_export_limit_kw
@@ -1508,7 +1699,7 @@ automation:
                         target:
                           entity_id: input_number.sigenergy_export_threshold
                         data:
-                          value: 0.033
+                          value: 0.06
               - choose:
                   - conditions:
                       - condition: template
@@ -1533,7 +1724,7 @@ automation:
                   message: >-
                     Detected and fixed reset values after restart:
                     {% if master_off %}• Master switch → ON{% endif %}
-                    {% if threshold_reset %}• Export threshold → 3.3 c/kWh{% endif %}
+                    {% if threshold_reset %}• Export threshold → 6 c/kWh{% endif %}
                     {% if limit_reset %}• Export limit → 5 kW{% endif %}
                     {% if soc_reset %}• SOC schedule → Conservative{% endif %}
                     {% if se_prev_reset %}• SE prev lifetime → {{ current_se_export }} kWh{% endif %}
@@ -2212,45 +2403,134 @@ automation:
         data:
           value: "{{ sigen_import }}"
 
-  - id: 'sigenergy_daily_summary_email'
-    alias: "Sigenergy — Daily Summary Email"
-    description: "Send comprehensive daily energy summary at midnight"
+  # --- v4.0: Capture Yesterday Values BEFORE midnight reset ---
+  - id: 'sigenergy_capture_yesterday_values'
+    alias: "Sigenergy — Capture Yesterday Values"
+    description: "Capture utility meter values at 23:59:55 before midnight reset"
     mode: single
     triggers:
       - trigger: time
-        at: "00:00:30"
+        at: "23:59:55"
+    actions:
+      - variables:
+          se_export_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
+          se_import_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_imported') | float(0) }}"
+          sigen_export_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
+          sigen_import_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
+          se_export_start: "{{ states('input_number.sigenergy_se_start_of_day_export') | float(0) }}"
+          se_import_start: "{{ states('input_number.sigenergy_se_start_of_day_import') | float(0) }}"
+          sigen_export_start: "{{ states('input_number.sigenergy_sigen_start_of_day_export') | float(0) }}"
+          sigen_import_start: "{{ states('input_number.sigenergy_sigen_start_of_day_import') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_grid_export
+        data:
+          value: "{{ states('sensor.sigenergy_daily_grid_export') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_grid_import
+        data:
+          value: "{{ states('sensor.sigenergy_daily_grid_import') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_consumption
+        data:
+          value: "{{ states('sensor.sigenergy_daily_consumption') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_battery_charge
+        data:
+          value: "{{ states('sensor.sigenergy_daily_battery_charge') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_battery_discharge
+        data:
+          value: "{{ states('sensor.sigenergy_daily_battery_discharge') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_pv_yield
+        data:
+          value: "{{ states('sensor.sigenergy_daily_pv_yield') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_min_soc
+        data:
+          value: "{{ states('input_number.sigenergy_daily_min_soc') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_max_soc
+        data:
+          value: "{{ states('input_number.sigenergy_daily_max_soc') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_export_earnings
+        data:
+          value: "{{ states('input_number.sigenergy_daily_export_earnings') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_export_missing_price
+        data:
+          value: "{{ states('input_number.sigenergy_daily_export_missing_price') | float(0) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_se_export_delta
+        data:
+          value: "{{ (se_export_now - se_export_start) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_se_import_delta
+        data:
+          value: "{{ (se_import_now - se_import_start) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_sigen_export_delta
+        data:
+          value: "{{ (sigen_export_now - sigen_export_start) | round(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sigenergy_yesterday_sigen_import_delta
+        data:
+          value: "{{ (sigen_import_now - sigen_import_start) | round(3) }}"
+      - action: system_log.write
+        data:
+          message: >-
+            Sigenergy: Captured yesterday values — Grid export: {{ states('sensor.sigenergy_daily_grid_export') }} kWh,
+            Earnings: ${{ states('input_number.sigenergy_daily_export_earnings') }},
+            SOC range: {{ states('input_number.sigenergy_daily_min_soc') }}%-{{ states('input_number.sigenergy_daily_max_soc') }}%
+          level: info
+          logger: sigenergy.daily
+
+  - id: 'sigenergy_daily_summary_email'
+    alias: "Sigenergy — Daily Summary Email"
+    description: "Send comprehensive daily energy summary at 06:30 AM using captured yesterday values"
+    mode: single
+    triggers:
+      - trigger: time
+        at: "06:30:00"
     actions:
       - variables:
           yesterday: "{{ (now() - timedelta(days=1)).strftime('%Y-%m-%d') }}"
           yesterday_display: "{{ (now() - timedelta(days=1)).strftime('%d/%m/%Y') }}"
           current_month: "{{ now().strftime('%B %Y') }}"
           is_first_of_month: "{{ now().day == 1 }}"
-          grid_export: "{{ states('sensor.sigenergy_daily_grid_export') | float(0) | round(2) }}"
-          grid_import: "{{ states('sensor.sigenergy_daily_grid_import') | float(0) | round(2) }}"
-          battery_charge: "{{ states('sensor.sigenergy_daily_battery_charge') | float(0) | round(2) }}"
-          battery_discharge: "{{ states('sensor.sigenergy_daily_battery_discharge') | float(0) | round(2) }}"
-          pv_yield: "{{ states('sensor.sigenergy_daily_pv_yield') | float(0) | round(2) }}"
-          consumption: "{{ states('sensor.sigenergy_daily_consumption') | float(0) | round(2) }}"
+          grid_export: "{{ states('input_number.sigenergy_yesterday_grid_export') | float(0) | round(2) }}"
+          grid_import: "{{ states('input_number.sigenergy_yesterday_grid_import') | float(0) | round(2) }}"
+          battery_charge: "{{ states('input_number.sigenergy_yesterday_battery_charge') | float(0) | round(2) }}"
+          battery_discharge: "{{ states('input_number.sigenergy_yesterday_battery_discharge') | float(0) | round(2) }}"
+          pv_yield: "{{ states('input_number.sigenergy_yesterday_pv_yield') | float(0) | round(2) }}"
+          consumption: "{{ states('input_number.sigenergy_yesterday_consumption') | float(0) | round(2) }}"
           soc_now: "{{ states('sensor.sigen_0_plant_battery_soc') | float(0) | round(1) }}"
-          soc_min: "{{ states('input_number.sigenergy_daily_min_soc') | float(0) | round(1) }}"
-          soc_max: "{{ states('input_number.sigenergy_daily_max_soc') | float(0) | round(1) }}"
-          export_earnings: "{{ states('input_number.sigenergy_daily_export_earnings') | float(0) | round(2) }}"
-          export_missing: "{{ states('input_number.sigenergy_daily_export_missing_price') | float(0) | round(2) }}"
+          soc_min: "{{ states('input_number.sigenergy_yesterday_min_soc') | float(0) | round(1) }}"
+          soc_max: "{{ states('input_number.sigenergy_yesterday_max_soc') | float(0) | round(1) }}"
+          export_earnings: "{{ states('input_number.sigenergy_yesterday_export_earnings') | float(0) | round(2) }}"
+          export_missing: "{{ states('input_number.sigenergy_yesterday_export_missing_price') | float(0) | round(2) }}"
           net_grid: "{{ (grid_export - grid_import) | round(2) }}"
           net_grid_label: "{% if (grid_export - grid_import) >= 0 %}net export{% else %}net import{% endif %}"
-          se_export_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_exported') | float(0) }}"
-          se_import_now: "{{ states('sensor.solaredge_i1_m1_ac_energy_imported') | float(0) }}"
-          se_export_start: "{{ states('input_number.sigenergy_se_start_of_day_export') | float(0) }}"
-          se_import_start: "{{ states('input_number.sigenergy_se_start_of_day_import') | float(0) }}"
-          sigen_export_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_export_energy') | float(0) }}"
-          sigen_import_now: "{{ states('sensor.sigen_0_grid_sensor_lifetime_import_energy') | float(0) }}"
-          sigen_export_start: "{{ states('input_number.sigenergy_sigen_start_of_day_export') | float(0) }}"
-          sigen_import_start: "{{ states('input_number.sigenergy_sigen_start_of_day_import') | float(0) }}"
-          se_daily_export: "{{ (se_export_now - se_export_start) | round(2) }}"
-          se_daily_import: "{{ (se_import_now - se_import_start) | round(2) }}"
-          sigen_daily_export: "{{ (sigen_export_now - sigen_export_start) | round(2) }}"
-          sigen_daily_import: "{{ (sigen_import_now - sigen_import_start) | round(2) }}"
-          threshold_c: "{{ (states('input_number.sigenergy_export_threshold') | float(0.033) * 100) | round(1) }}"
+          se_daily_export: "{{ states('input_number.sigenergy_yesterday_se_export_delta') | float(0) | round(2) }}"
+          se_daily_import: "{{ states('input_number.sigenergy_yesterday_se_import_delta') | float(0) | round(2) }}"
+          sigen_daily_export: "{{ states('input_number.sigenergy_yesterday_sigen_export_delta') | float(0) | round(2) }}"
+          sigen_daily_import: "{{ states('input_number.sigenergy_yesterday_sigen_import_delta') | float(0) | round(2) }}"
+          threshold_c: "{{ (states('input_number.sigenergy_export_threshold') | float(0.06) * 100) | round(1) }}"
           monthly_kwh: "{{ states('input_number.sigenergy_monthly_se_export_kwh') | float(0) | round(1) }}"
           monthly_earnings: "{{ states('input_number.sigenergy_monthly_export_earnings') | float(0) | round(2) }}"
           monthly_missing: "{{ states('input_number.sigenergy_monthly_export_missing_price') | float(0) | round(2) }}"

@@ -1,0 +1,249 @@
+# =============================================================================
+# LOUNGEROOM LIGHTING PACKAGE
+# =============================================================================
+# File: packages/loungeroom_lighting.yaml
+# Revision: 1.0
+# Created: 2026-02-05
+#
+# Description: Scene switch control for loungeroom Mercator downlights
+#              Two switches (different models) operate identically
+#
+# NOTE: Mercator SMD4106W-RGB-ZB downlights have buggy firmware that reports
+#       incorrect state. Solution: use input_boolean helpers to track intended
+#       state. Also use staged turn-on (1% wake → color temp → brightness)
+#       with 150ms delays.
+#
+# =============================================================================
+# SWITCHES:
+#   - Lounge Scene Switch – 3G (ZT-SY-EU) Glenn (MOES 3-button)
+#   - Lounge Switch 3-Button (TS0043) Wall (Tuya 3-button)
+#
+# BUTTON MAPPING:
+#   Button 1: Window lights (back + front) - 100%, 3000K, 3s fade
+#   Button 2: Middle lights (back + front) - 100%, 3000K, 3s fade
+#   Button 3: TV lights (back + front) - 100%, 3000K, 3s fade
+#
+# LIGHTS CONTROLLED:
+#   - light.lounge_window_back_light (Mercator SMD4106W-RGB-ZB)
+#   - light.lounge_window_front_light (Mercator SMD4106W-RGB-ZB)
+#   - light.lounge_middle_back_light (Mercator SMD4106W-RGB-ZB)
+#   - light.lounge_middle_front_light (Mercator SMD4106W-RGB-ZB)
+#   - light.lounge_tv_back_light (Mercator SMD4106W-RGB-ZB)
+#   - light.lounge_tv_front_light (Mercator SMD4106W-RGB-ZB)
+# =============================================================================
+
+# =============================================================================
+# HELPERS - Track intended state for unreliable Mercator lights
+# =============================================================================
+input_boolean:
+  lounge_window_lights_on:
+    name: "Lounge Window Lights Intended State"
+    icon: mdi:lightbulb
+  lounge_middle_lights_on:
+    name: "Lounge Middle Lights Intended State"
+    icon: mdi:lightbulb
+  lounge_tv_lights_on:
+    name: "Lounge TV Lights Intended State"
+    icon: mdi:lightbulb
+
+# =============================================================================
+# AUTOMATIONS
+# =============================================================================
+automation:
+
+  # ===========================================================================
+  # BUTTON 1 — Window Lights Toggle
+  # ===========================================================================
+  # Triggered by either switch, uses helper for reliable state tracking
+  # ---------------------------------------------------------------------------
+  - id: lounge_btn1_window
+    alias: "Lounge — Button 1 (Window Lights)"
+    description: "Toggle window downlights using helper state. On: 100%, 3000K, 3s fade."
+    triggers:
+      - trigger: mqtt
+        topic: "zigbee2mqtt/Lounge Scene Switch – 3G (ZT-SY-EU) Glenn/action"
+        payload: "1_single"
+      - trigger: mqtt
+        topic: "zigbee2mqtt/Lounge Switch 3-Button (TS0043) Wall/action"
+        payload: "1_single"
+    actions:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.lounge_window_lights_on
+                state: "on"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.lounge_window_lights_on
+              - action: light.turn_off
+                target:
+                  entity_id:
+                    - light.lounge_window_back_light
+                    - light.lounge_window_front_light
+                data:
+                  transition: 3
+        default:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.lounge_window_lights_on
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_window_back_light
+                - light.lounge_window_front_light
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 150
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_window_back_light
+                - light.lounge_window_front_light
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 150
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_window_back_light
+                - light.lounge_window_front_light
+            data:
+              brightness_pct: 100
+              transition: 3
+    mode: single
+    max_exceeded: silent
+
+  # ===========================================================================
+  # BUTTON 2 — Middle Lights Toggle
+  # ===========================================================================
+  - id: lounge_btn2_middle
+    alias: "Lounge — Button 2 (Middle Lights)"
+    description: "Toggle middle downlights using helper state. On: 100%, 3000K, 3s fade."
+    triggers:
+      - trigger: mqtt
+        topic: "zigbee2mqtt/Lounge Scene Switch – 3G (ZT-SY-EU) Glenn/action"
+        payload: "2_single"
+      - trigger: mqtt
+        topic: "zigbee2mqtt/Lounge Switch 3-Button (TS0043) Wall/action"
+        payload: "2_single"
+    actions:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.lounge_middle_lights_on
+                state: "on"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.lounge_middle_lights_on
+              - action: light.turn_off
+                target:
+                  entity_id:
+                    - light.lounge_middle_back_light
+                    - light.lounge_middle_front_light
+                data:
+                  transition: 3
+        default:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.lounge_middle_lights_on
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_middle_back_light
+                - light.lounge_middle_front_light
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 150
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_middle_back_light
+                - light.lounge_middle_front_light
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 150
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_middle_back_light
+                - light.lounge_middle_front_light
+            data:
+              brightness_pct: 100
+              transition: 3
+    mode: single
+    max_exceeded: silent
+
+  # ===========================================================================
+  # BUTTON 3 — TV Lights Toggle
+  # ===========================================================================
+  - id: lounge_btn3_tv
+    alias: "Lounge — Button 3 (TV Lights)"
+    description: "Toggle TV downlights using helper state. On: 100%, 3000K, 3s fade."
+    triggers:
+      - trigger: mqtt
+        topic: "zigbee2mqtt/Lounge Scene Switch – 3G (ZT-SY-EU) Glenn/action"
+        payload: "3_single"
+      - trigger: mqtt
+        topic: "zigbee2mqtt/Lounge Switch 3-Button (TS0043) Wall/action"
+        payload: "3_single"
+    actions:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.lounge_tv_lights_on
+                state: "on"
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.lounge_tv_lights_on
+              - action: light.turn_off
+                target:
+                  entity_id:
+                    - light.lounge_tv_back_light
+                    - light.lounge_tv_front_light
+                data:
+                  transition: 3
+        default:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.lounge_tv_lights_on
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_tv_back_light
+                - light.lounge_tv_front_light
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 150
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_tv_back_light
+                - light.lounge_tv_front_light
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 150
+          - action: light.turn_on
+            target:
+              entity_id:
+                - light.lounge_tv_back_light
+                - light.lounge_tv_front_light
+            data:
+              brightness_pct: 100
+              transition: 3
+    mode: single
+    max_exceeded: silent
