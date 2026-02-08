@@ -21,3 +21,5 @@ secrets.yaml
 # Temporary files
 *.tmp
 *.log
+
+.pull-backups
