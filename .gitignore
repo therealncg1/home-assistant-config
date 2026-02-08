@@ -4,6 +4,9 @@
 # ha-sync.sh
 ha-sync.sh
 
+# ha-pull.sh
+ha-pull.sh
+
 # Secrets (if you have them)
 secrets.yaml
 
