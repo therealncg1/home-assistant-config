@@ -1,0 +1,828 @@
+# =============================================================================
+# SIGENERGY ENERGY ANALYSIS DASHBOARD
+# =============================================================================
+# Revision: 2.1
+# Created: 2026-02-08
+# Updated: 2026-02-08
+#
+# HACS Dependencies:
+#   1. apexcharts-card       — github.com/RomRider/apexcharts-card
+#   2. power-flow-card-plus  — github.com/flixlix/power-flow-card-plus
+#
+# This file is managed via ha-sync.sh and referenced from configuration.yaml
+# =============================================================================
+
+views:
+  # =========================================================================
+  # TAB 1: POWER FLOW (animated real-time)
+  # =========================================================================
+  - title: Power Flow
+    path: power-flow
+    icon: mdi:home-lightning-bolt
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: custom:power-flow-card-plus
+            entities:
+              solar:
+                entity: sensor.sigen_0_total_pv_power
+              battery:
+                entity:
+                  consumption: sensor.sigen_0_battery_discharging_power
+                  production: sensor.sigen_0_battery_charging_power
+                state_of_charge: sensor.sigen_0_plant_battery_soc
+                state_of_charge_unit: "%"
+                color_state_of_charge_value: true
+                display_state: two_way
+              grid:
+                entity:
+                  consumption: sensor.sigen_0_grid_sensor_import_power
+                  production: sensor.sigen_0_grid_sensor_export_power
+                color_circle: true
+                display_state: two_way
+              home:
+                entity: sensor.sigen_0_consumed_power
+                override_state: true
+            clickable_entities: true
+            display_zero_lines:
+              mode: show
+              transparency: 50
+            w_decimals: 0
+            kw_decimals: 1
+            min_flow_rate: 0.75
+            max_flow_rate: 6
+            watt_threshold: 1000
+
+      - type: grid
+        cards:
+          - type: gauge
+            entity: sensor.sigen_0_plant_battery_soc
+            name: Battery SOC
+            severity:
+              green: 40
+              yellow: 20
+              red: 10
+            min: 0
+            max: 100
+            needle: true
+
+          - type: entity
+            entity: sensor.glenn_home_feed_in_price
+            name: Feed-in Price
+            icon: mdi:cash-plus
+
+          - type: entity
+            entity: sensor.glenn_home_general_price
+            name: Import Price
+            icon: mdi:cash-minus
+
+          - type: entity
+            entity: binary_sensor.sigenergy_export_allowed
+            name: Export Decision
+            icon: mdi:transmission-tower-export
+
+          - type: entity
+            entity: input_boolean.sigenergy_master_enabled
+            name: Master Switch
+
+          - type: entity
+            entity: input_boolean.sigenergy_export_active
+            name: Exporting
+
+          - type: entity
+            entity: input_boolean.sigenergy_grid_charge_active
+            name: Grid Charging
+
+          - type: entity
+            entity: sensor.sigenergy_current_min_soc
+            name: Min SOC (this hour)
+            icon: mdi:battery-alert
+
+  # =========================================================================
+  # TAB 2: OVERVIEW
+  # =========================================================================
+  - title: Overview
+    path: overview
+    icon: mdi:view-dashboard
+    type: sections
+    max_columns: 4
+    sections:
+      - type: grid
+        cards:
+          - type: entity
+            entity: input_number.sigenergy_daily_export_earnings
+            name: Today's Earnings
+            icon: mdi:cash-register
+
+          - type: entity
+            entity: input_number.sigenergy_monthly_export_earnings
+            name: Monthly Earnings
+            icon: mdi:calendar-currency
+
+          - type: entity
+            entity: sensor.sigenergy_monthly_avg_feed_in_price
+            name: Avg Feed-in (Month)
+            icon: mdi:chart-line
+
+          - type: entity
+            entity: input_number.sigenergy_export_threshold
+            name: Export Threshold
+            icon: mdi:tune
+
+      - type: grid
+        cards:
+          - type: entity
+            entity: binary_sensor.sigenergy_remote_ems_active
+            name: Remote EMS
+
+          - type: entity
+            entity: sensor.sigenergy_remote_ems_status
+            name: EMS Status
+
+          - type: entity
+            entity: sensor.sigenergy_state_mismatch
+            name: State Mismatch
+
+          - type: entity
+            entity: sensor.sigenergy_desired_export_limit
+            name: Desired Export Limit
+
+      - type: grid
+        cards:
+          - type: entity
+            entity: sensor.sigenergy_daily_grid_export
+            name: Daily Export
+            icon: mdi:transmission-tower-export
+
+          - type: entity
+            entity: sensor.sigenergy_daily_grid_import
+            name: Daily Import
+            icon: mdi:transmission-tower-import
+
+          - type: entity
+            entity: sensor.sigenergy_daily_consumption
+            name: Daily Consumption
+            icon: mdi:home-lightning-bolt
+
+          - type: entity
+            entity: sensor.sigenergy_daily_pv_yield
+            name: Daily PV Yield
+            icon: mdi:solar-power-variant
+
+      - type: grid
+        cards:
+          - type: entity
+            entity: sensor.sigenergy_daily_battery_discharge
+            name: Battery Discharge
+            icon: mdi:battery-arrow-down
+
+          - type: entity
+            entity: sensor.sigenergy_daily_battery_charge
+            name: Battery Charge
+            icon: mdi:battery-arrow-up
+
+          - type: entity
+            entity: input_number.sigenergy_daily_min_soc
+            name: SOC Min Today
+            icon: mdi:battery-low
+
+          - type: entity
+            entity: input_number.sigenergy_daily_max_soc
+            name: SOC Max Today
+            icon: mdi:battery-high
+
+  # =========================================================================
+  # TAB 3: BATTERY & SOC
+  # =========================================================================
+  - title: Battery
+    path: battery
+    icon: mdi:battery-charging
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Battery SOC vs Feed-in Price — Last 24 Hours
+              show: true
+            graph_span: 24h
+            yaxis:
+              - id: soc
+                min: 0
+                max: 100
+                apex_config:
+                  title:
+                    text: "SOC %"
+              - id: price
+                opposite: true
+                min: ~0
+                apex_config:
+                  title:
+                    text: "c/kWh"
+            series:
+              - entity: sensor.sigen_0_plant_battery_soc
+                name: Battery SOC
+                type: area
+                yaxis_id: soc
+                color: "#6366f1"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 5min
+              - entity: sensor.glenn_home_feed_in_price
+                name: Feed-in Price
+                type: line
+                yaxis_id: price
+                color: "#f59e0b"
+                stroke_width: 1.5
+                transform: "return x * 100;"
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 5min
+              - entity: sensor.sigenergy_current_min_soc
+                name: Min SOC Reserve
+                type: line
+                yaxis_id: soc
+                color: "#ef4444"
+                stroke_width: 1
+                stroke_dash: 5
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 30min
+            apex_config:
+              chart:
+                height: 350
+              annotations:
+                yaxis:
+                  - y: 6
+                    yAxisIndex: 1
+                    borderColor: "#ef4444"
+                    strokeDashArray: 4
+                    label:
+                      text: "6c threshold"
+                      style:
+                        color: "#ef4444"
+                        background: transparent
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Battery SOC — Last 7 Days
+              show: true
+            graph_span: 7d
+            yaxis:
+              - id: soc
+                min: 0
+                max: 100
+            series:
+              - entity: sensor.sigen_0_plant_battery_soc
+                name: Battery SOC
+                type: area
+                yaxis_id: soc
+                color: "#6366f1"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: avg
+                  duration: 15min
+              - entity: sensor.sigenergy_current_min_soc
+                name: Min SOC Reserve
+                type: line
+                yaxis_id: soc
+                color: "#ef4444"
+                stroke_width: 1
+                stroke_dash: 5
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 1h
+            apex_config:
+              chart:
+                height: 300
+
+  # =========================================================================
+  # TAB 4: PRICING
+  # =========================================================================
+  - title: Pricing
+    path: pricing
+    icon: mdi:cash-multiple
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Amber Pricing — Last 24 Hours
+              show: true
+            graph_span: 24h
+            yaxis:
+              - id: price
+                apex_config:
+                  title:
+                    text: "c/kWh"
+            series:
+              - entity: sensor.glenn_home_feed_in_price
+                name: Feed-in
+                type: area
+                yaxis_id: price
+                color: "#10b981"
+                opacity: 0.1
+                stroke_width: 2
+                transform: "return x * 100;"
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 5min
+              - entity: sensor.glenn_home_general_price
+                name: Import
+                type: line
+                yaxis_id: price
+                color: "#ef4444"
+                stroke_width: 2
+                transform: "return x * 100;"
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 5min
+            apex_config:
+              chart:
+                height: 350
+              annotations:
+                yaxis:
+                  - y: 6
+                    borderColor: "#f59e0b"
+                    strokeDashArray: 4
+                    label:
+                      text: "Export threshold 6c"
+                      style:
+                        color: "#f59e0b"
+                        background: transparent
+                  - y: 0
+                    borderColor: "#3b82f6"
+                    strokeDashArray: 4
+                    label:
+                      text: "Free/negative"
+                      style:
+                        color: "#3b82f6"
+                        background: transparent
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Feed-in Price — Last 7 Days
+              show: true
+            graph_span: 7d
+            yaxis:
+              - id: price
+                apex_config:
+                  title:
+                    text: "c/kWh"
+            series:
+              - entity: sensor.glenn_home_feed_in_price
+                name: Feed-in
+                type: area
+                yaxis_id: price
+                color: "#10b981"
+                opacity: 0.1
+                stroke_width: 1.5
+                transform: "return x * 100;"
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 15min
+            apex_config:
+              chart:
+                height: 300
+              annotations:
+                yaxis:
+                  - y: 6
+                    borderColor: "#f59e0b"
+                    strokeDashArray: 4
+                    label:
+                      text: "6c"
+                      style:
+                        color: "#f59e0b"
+                        background: transparent
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: AEMO Wholesale vs Amber Feed-in (c/kWh)
+              show: true
+            graph_span: 24h
+            yaxis:
+              - id: price
+                apex_config:
+                  title:
+                    text: "c/kWh"
+            series:
+              - entity: sensor.aemo_vic1_wholesale_c_kwh
+                name: AEMO Wholesale
+                type: line
+                yaxis_id: price
+                color: "#3b82f6"
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 5min
+              - entity: sensor.glenn_home_feed_in_price
+                name: Amber Feed-in
+                type: line
+                yaxis_id: price
+                color: "#f59e0b"
+                stroke_width: 2
+                transform: "return x * 100;"
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 5min
+            apex_config:
+              chart:
+                height: 300
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Amber Margin (AEMO − Amber) — Negative = Amber pays more
+              show: true
+            graph_span: 24h
+            yaxis:
+              - id: margin
+                apex_config:
+                  title:
+                    text: "c/kWh"
+            series:
+              - entity: sensor.amber_feedin_margin
+                name: Margin
+                type: area
+                yaxis_id: margin
+                color: "#ec4899"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 5min
+            apex_config:
+              chart:
+                height: 250
+              annotations:
+                yaxis:
+                  - y: 0
+                    borderColor: "#475569"
+                    strokeDashArray: 0
+
+  # =========================================================================
+  # TAB 5: ENERGY FLOWS
+  # =========================================================================
+  - title: Energy
+    path: energy
+    icon: mdi:lightning-bolt
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Grid Export vs Import — Last 24 Hours
+              show: true
+            graph_span: 24h
+            yaxis:
+              - id: energy
+                apex_config:
+                  title:
+                    text: "kWh"
+            series:
+              - entity: sensor.sigenergy_daily_grid_export
+                name: Grid Export
+                type: area
+                yaxis_id: energy
+                color: "#10b981"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 15min
+              - entity: sensor.sigenergy_daily_grid_import
+                name: Grid Import
+                type: area
+                yaxis_id: energy
+                color: "#ef4444"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 15min
+            apex_config:
+              chart:
+                height: 300
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Battery Charge vs Discharge — Last 24 Hours
+              show: true
+            graph_span: 24h
+            yaxis:
+              - id: energy
+                apex_config:
+                  title:
+                    text: "kWh"
+            series:
+              - entity: sensor.sigenergy_daily_battery_charge
+                name: Charge
+                type: area
+                yaxis_id: energy
+                color: "#f97316"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 15min
+              - entity: sensor.sigenergy_daily_battery_discharge
+                name: Discharge
+                type: area
+                yaxis_id: energy
+                color: "#06b6d4"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 15min
+            apex_config:
+              chart:
+                height: 300
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: House Consumption vs PV Yield — Last 24 Hours
+              show: true
+            graph_span: 24h
+            yaxis:
+              - id: energy
+                apex_config:
+                  title:
+                    text: "kWh"
+            series:
+              - entity: sensor.sigenergy_daily_consumption
+                name: Consumption
+                type: area
+                yaxis_id: energy
+                color: "#8b5cf6"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 15min
+              - entity: sensor.sigenergy_daily_pv_yield
+                name: PV Yield
+                type: area
+                yaxis_id: energy
+                color: "#eab308"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 15min
+            apex_config:
+              chart:
+                height: 300
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Grid Export — Last 7 Days (cumulative per day)
+              show: true
+            graph_span: 7d
+            yaxis:
+              - id: energy
+                apex_config:
+                  title:
+                    text: "kWh"
+            series:
+              - entity: sensor.sigenergy_daily_grid_export
+                name: Daily Export
+                type: area
+                yaxis_id: energy
+                color: "#10b981"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 30min
+            apex_config:
+              chart:
+                height: 250
+
+  # =========================================================================
+  # TAB 6: SOC SCHEDULE
+  # =========================================================================
+  - title: SOC Schedule
+    path: soc-schedule
+    icon: mdi:clock-outline
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: SOC Reserve Schedule (Conservative)
+              show: true
+            graph_span: 24h
+            span:
+              start: day
+            update_interval: 5min
+            yaxis:
+              - id: soc
+                min: 0
+                max: 60
+                apex_config:
+                  title:
+                    text: "Min SOC %"
+            all_series_config:
+              type: column
+              yaxis_id: soc
+              group_by:
+                func: last
+                duration: 1h
+            series:
+              - entity: sensor.sigenergy_current_min_soc
+                name: Min SOC Reserve
+                color: "#6366f1"
+                extend_to: false
+            apex_config:
+              chart:
+                height: 300
+              plotOptions:
+                bar:
+                  columnWidth: "80%"
+
+      - type: grid
+        cards:
+          - type: entities
+            title: Hourly SOC Minimums
+            show_header_toggle: false
+            entities:
+              - entity: input_number.sigenergy_min_soc_hour_00
+                name: "00:00"
+              - entity: input_number.sigenergy_min_soc_hour_01
+                name: "01:00"
+              - entity: input_number.sigenergy_min_soc_hour_02
+                name: "02:00"
+              - entity: input_number.sigenergy_min_soc_hour_03
+                name: "03:00"
+              - entity: input_number.sigenergy_min_soc_hour_04
+                name: "04:00"
+              - entity: input_number.sigenergy_min_soc_hour_05
+                name: "05:00"
+              - entity: input_number.sigenergy_min_soc_hour_06
+                name: "06:00"
+              - entity: input_number.sigenergy_min_soc_hour_07
+                name: "07:00"
+              - entity: input_number.sigenergy_min_soc_hour_08
+                name: "08:00"
+              - entity: input_number.sigenergy_min_soc_hour_09
+                name: "09:00"
+              - entity: input_number.sigenergy_min_soc_hour_10
+                name: "10:00"
+              - entity: input_number.sigenergy_min_soc_hour_11
+                name: "11:00"
+
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: input_number.sigenergy_min_soc_hour_12
+                name: "12:00"
+              - entity: input_number.sigenergy_min_soc_hour_13
+                name: "13:00"
+              - entity: input_number.sigenergy_min_soc_hour_14
+                name: "14:00"
+              - entity: input_number.sigenergy_min_soc_hour_15
+                name: "15:00"
+              - entity: input_number.sigenergy_min_soc_hour_16
+                name: "16:00"
+              - entity: input_number.sigenergy_min_soc_hour_17
+                name: "17:00"
+              - entity: input_number.sigenergy_min_soc_hour_18
+                name: "18:00"
+              - entity: input_number.sigenergy_min_soc_hour_19
+                name: "19:00"
+              - entity: input_number.sigenergy_min_soc_hour_20
+                name: "20:00"
+              - entity: input_number.sigenergy_min_soc_hour_21
+                name: "21:00"
+              - entity: input_number.sigenergy_min_soc_hour_22
+                name: "22:00"
+              - entity: input_number.sigenergy_min_soc_hour_23
+                name: "23:00"
+
+  # =========================================================================
+  # TAB 7: MONTHLY SUMMARY
+  # =========================================================================
+  - title: Monthly
+    path: monthly
+    icon: mdi:calendar-month
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: entity
+            entity: input_number.sigenergy_monthly_export_earnings
+            name: February Earnings
+            icon: mdi:currency-usd
+
+          - type: entity
+            entity: input_number.sigenergy_monthly_se_export_kwh
+            name: February Export (SE)
+            icon: mdi:transmission-tower-export
+
+          - type: entity
+            entity: sensor.sigenergy_monthly_avg_feed_in_price
+            name: Avg Feed-in Price
+            icon: mdi:chart-line
+
+          - type: entity
+            entity: sensor.sigenergy_monthly_estimate_summary
+            name: Monthly Estimate
+            icon: mdi:calculator
+
+      - type: grid
+        cards:
+          - type: custom:apexcharts-card
+            header:
+              title: Monthly Export Earnings (running total)
+              show: true
+            graph_span: 30d
+            yaxis:
+              - id: earnings
+                apex_config:
+                  title:
+                    text: "$"
+            series:
+              - entity: input_number.sigenergy_monthly_export_earnings
+                name: Earnings
+                type: area
+                yaxis_id: earnings
+                color: "#10b981"
+                opacity: 0.15
+                stroke_width: 2
+                extend_to: now
+                group_by:
+                  func: last
+                  duration: 1h
+            apex_config:
+              chart:
+                height: 300
+
+      - type: grid
+        cards:
+          - type: entities
+            title: Yesterday's Summary
+            show_header_toggle: false
+            entities:
+              - entity: input_number.sigenergy_yesterday_grid_export
+                name: Grid Export
+              - entity: input_number.sigenergy_yesterday_grid_import
+                name: Grid Import
+              - entity: input_number.sigenergy_yesterday_consumption
+                name: Consumption
+              - entity: input_number.sigenergy_yesterday_pv_yield
+                name: PV Yield
+              - entity: input_number.sigenergy_yesterday_battery_discharge
+                name: Battery Discharge
+              - entity: input_number.sigenergy_yesterday_battery_charge
+                name: Battery Charge
+              - entity: input_number.sigenergy_yesterday_export_earnings
+                name: Export Earnings
+              - entity: input_number.sigenergy_yesterday_min_soc
+                name: Min SOC
+              - entity: input_number.sigenergy_yesterday_max_soc
+                name: Max SOC

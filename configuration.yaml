@@ -2,16 +2,30 @@
 # HOME ASSISTANT CONFIGURATION
 # =============================================================================
 # File: configuration.yaml
-# Revision: 2.2
-# Last Updated: 2026-01-31
-# Changes: Moved recorder db_url and all Hubitat API tokens to secrets.yaml
+# Revision: 2.4
+# Last Updated: 2026-02-08
+# Changes: Added frontend themes support (for Graphite dark theme via HACS)
 # =============================================================================
 
 # ========== Core ==========
 default_config:
 
+# ========== Frontend Themes ==========
+frontend:
+  themes: !include_dir_merge_named themes
+
+# ========== Lovelace Dashboards ==========
+lovelace:
+  mode: storage
+  dashboards:
+    energy-analysis:
+      mode: yaml
+      title: Energy Analysis
+      icon: mdi:lightning-bolt
+      filename: dashboards/energy_analysis.yaml
+      show_in_sidebar: true
+
 # ========== Packages ==========
-# All Sigenergy/Amber energy management is now in packages/
 homeassistant:
   packages: !include_dir_named packages/
 
@@ -72,12 +86,12 @@ rest_command:
   # All URLs stored in secrets.yaml (tokens hidden)
   # -------------------------------
 
-  hubitat_read_device: # debug/verification
+  hubitat_read_device:
     url: !secret hubitat_api_device_url
     method: get
     timeout: 10
 
-  hubitat_on: # generic ON via POST JSON
+  hubitat_on:
     url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
@@ -85,7 +99,7 @@ rest_command:
       {"command":"on"}
     timeout: 10
 
-  hubitat_off: # generic OFF via POST JSON
+  hubitat_off:
     url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
@@ -93,7 +107,7 @@ rest_command:
       {"command":"off"}
     timeout: 10
 
-  hubitat_set_level: # setLevel(level[, durationSeconds])
+  hubitat_set_level:
     url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
@@ -105,7 +119,7 @@ rest_command:
       {% endif %}
     timeout: 10
 
-  hubitat_set_ct: # setColorTemperature(kelvin[, level[, durationSeconds]])
+  hubitat_set_ct:
     url: !secret hubitat_api_device_url
     method: post
     content_type: "application/json"
@@ -119,7 +133,7 @@ rest_command:
       {% endif %}
     timeout: 10
 
-  garage_close_now: # garage momentary (device 118)
+  garage_close_now:
     url: !secret hubitat_garage_close_url
     method: post
     content_type: "application/json"
