@@ -79,6 +79,10 @@ devices:
   '0xa4c138db9f671f11':
     friendly_name: Dining Scene Switch – 1G
     description: Dining Scene Switch – 1G
+  # -------------------------------------------------------------------------
+  # Mercator Kitchen Downlights (SMD4106W-RGB-ZB)
+  # These have buggy firmware - settings help stabilize state reporting
+  # -------------------------------------------------------------------------
   '0x60a423fffeaaefc3':
     friendly_name: Kitchen Downlight Bench Hall
     optimistic: false
@@ -99,22 +103,6 @@ devices:
       - state
   '0x0c2a6ffffe59d039':
     friendly_name: kitchen_scene_switch_3g
-  '0x60a423fffe69c021':
-    friendly_name: Lounge TV Back Light
-  '0x60a423fffeff229c':
-    friendly_name: Lounge TV Front Light
-  '0x60a423fffeff22b8':
-    friendly_name: Lounge Middle Front Light
-  '0x60a423fffea5fe1d':
-    friendly_name: Lounge Middle Back Light
-  '0x60a423fffe69bf0c':
-    friendly_name: Lounge Window Front Light
-  '0x60a423fffeaaeff2':
-    friendly_name: Lounge Window Back Light
-  '0x8c8b48fffe34e56a':
-    friendly_name: Lounge Scene Switch – 3G (ZT-SY-EU) Glenn
-  '0x0c2a6ffffe5ceba8':
-    friendly_name: Lounge Switch 3-Button (TS0043) Wall
 cache_state: true
 cache_state_persistent: true
 cache_state_send_on_startup: true
@@ -164,6 +152,6 @@ network_key:
 output: json
 pan_id: 14940
 timestamp_format: YYYY-MM-DD HH:mm:ss
-version: 5
+version: 4
 availability:
   enabled: false
