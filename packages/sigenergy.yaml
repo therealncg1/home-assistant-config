@@ -2,8 +2,12 @@
 # SIGENERGY ENERGY MANAGEMENT PACKAGE
 # =============================================================================
 # File: packages/sigenergy.yaml
-# Revision: 4.0.3
-# Last Updated: 2026-02-08
+# Revision: 4.0.4
+# Last Updated: 2026-02-09
+#
+# CHANGES IN 4.0.4:
+#   - Daily summary email time restored to 00:00:30 (yesterday values captured
+#     at 23:59:55 so no risk of zeros)
 #
 # CHANGES IN 4.0.3:
 #   - FIX: Removed initial: 0 from persistent helpers (monthly_export_earnings,
@@ -27,7 +31,7 @@
 #   - New sensors: AEMO VIC1 Wholesale c/kWh, Amber Feed-in Margin, AEMO Forecast
 #   - CRITICAL FIX: Daily email now captures yesterday's values at 23:59:55
 #     BEFORE utility meters reset at midnight (was showing all zeros)
-#   - Email time changed from 00:00:30 to 06:30 AM for more useful delivery
+#   - Email time changed back to 00:00:30 (yesterday values captured at 23:59:55)
 #   - New input_numbers for "yesterday" values storage
 #   - New automation: "Capture Yesterday Values" at 23:59:55
 #
@@ -2535,11 +2539,11 @@ automation:
 
   - id: 'sigenergy_daily_summary_email'
     alias: "Sigenergy — Daily Summary Email"
-    description: "Send comprehensive daily energy summary at 06:30 AM using captured yesterday values"
+    description: "Send comprehensive daily energy summary at 00:00:30 using captured yesterday values"
     mode: single
     triggers:
       - trigger: time
-        at: "06:30:00"
+        at: "00:00:30"
     actions:
       - variables:
           yesterday: "{{ (now() - timedelta(days=1)).strftime('%Y-%m-%d') }}"

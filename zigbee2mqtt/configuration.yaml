@@ -59,7 +59,7 @@ devices:
     description: Dining Room Door Blind
   '0x54ef44100134eeca':
     friendly_name: Master Bedroom Left Blind
-    description: Master Bedroom – Blind Left
+    description: "Master Bedroom \u2014 Blind Left"
     homeassistant:
       name: Master Bedroom Left Blind
     optimistic: true
@@ -69,50 +69,84 @@ devices:
   '0x7cc6b6fffecf6b52':
     friendly_name: Master Bedroom Blinds Switch
   '0x54ef441000cbe649':
-    friendly_name: Kitchen – Ceiling Light
+    friendly_name: "Kitchen \u2014 Ceiling Light"
   '0x54ef441000cbd44a':
-    friendly_name: Dining – Hall Light
-    description: Dining – Hall Light
+    friendly_name: "Dining \u2014 Hall Light"
+    description: "Dining \u2014 Hall Light"
   '0x54ef441000cbdeb8':
-    friendly_name: Dining – Door Light
-    description: Dining – Door Light
+    friendly_name: "Dining \u2014 Door Light"
+    description: "Dining \u2014 Door Light"
   '0xa4c138db9f671f11':
-    friendly_name: Dining Scene Switch – 1G
-    description: Dining Scene Switch – 1G
+    friendly_name: "Dining Scene Switch \u2014 1G"
+    description: "Dining Scene Switch \u2014 1G"
+  # ---------------------------------------------------------------------------
+  # Mercator SMD4106W-RGB-ZB Kitchen Downlights
+  # Buggy firmware sends bogus state reports — debounce suppresses them
+  # optimistic: false = wait for device confirmation before updating HA state
+  # debounce: 5000 = ignore state changes within 5s of a command (was 1000)
+  # ---------------------------------------------------------------------------
   '0x60a423fffeaaefc3':
     friendly_name: Kitchen Downlight Bench Hall
     optimistic: false
-    debounce: 1000
+    debounce: 5000
     debounce_ignore:
       - state
   '0x847127fffe9a8641':
     friendly_name: Kitchen Downlight Bench Window
     optimistic: false
-    debounce: 1000
+    debounce: 5000
     debounce_ignore:
       - state
   '0x60a423fffeff216d':
     friendly_name: Kitchen Downlight Sink
     optimistic: false
-    debounce: 1000
+    debounce: 5000
     debounce_ignore:
       - state
   '0x0c2a6ffffe59d039':
     friendly_name: kitchen_scene_switch_3g
+  # ---------------------------------------------------------------------------
+  # Mercator SMD4106W-RGB-ZB Lounge Downlights
+  # Same buggy firmware as kitchen — applying identical debounce settings
+  # ---------------------------------------------------------------------------
   '0x60a423fffe69c021':
     friendly_name: Lounge TV Back Light
+    optimistic: false
+    debounce: 5000
+    debounce_ignore:
+      - state
   '0x60a423fffeff229c':
     friendly_name: Lounge TV Front Light
+    optimistic: false
+    debounce: 5000
+    debounce_ignore:
+      - state
   '0x60a423fffeff22b8':
     friendly_name: Lounge Middle Front Light
+    optimistic: false
+    debounce: 5000
+    debounce_ignore:
+      - state
   '0x60a423fffea5fe1d':
     friendly_name: Lounge Middle Back Light
+    optimistic: false
+    debounce: 5000
+    debounce_ignore:
+      - state
   '0x60a423fffe69bf0c':
     friendly_name: Lounge Window Front Light
+    optimistic: false
+    debounce: 5000
+    debounce_ignore:
+      - state
   '0x60a423fffeaaeff2':
     friendly_name: Lounge Window Back Light
+    optimistic: false
+    debounce: 5000
+    debounce_ignore:
+      - state
   '0x8c8b48fffe34e56a':
-    friendly_name: Lounge Scene Switch – 3G (ZT-SY-EU) Glenn
+    friendly_name: "Lounge Scene Switch \u2014 3G (ZT-SY-EU) Glenn"
   '0x0c2a6ffffe5ceba8':
     friendly_name: Lounge Switch 3-Button (TS0043) Wall
 cache_state: true

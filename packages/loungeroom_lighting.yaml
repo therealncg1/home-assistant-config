@@ -2,20 +2,25 @@
 # LOUNGEROOM LIGHTING PACKAGE
 # =============================================================================
 # File: packages/loungeroom_lighting.yaml
-# Revision: 1.0
+# Revision: 2.0
 # Created: 2026-02-05
+# Updated: 2026-02-10
 #
-# Description: Scene switch control for loungeroom Mercator downlights
-#              Two switches (different models) operate identically
+# Changes in 2.0:
+#   - Sequential light commands with 300ms gaps for paired Mercator lights
+#     (prevents Zigbee mesh dropping commands when sent simultaneously)
+#   - Added HA restart helper sync automation (was missing — helpers could
+#     get out of sync after restart if lights were left on)
+#   - Added max_exceeded: silent to all automations
 #
 # NOTE: Mercator SMD4106W-RGB-ZB downlights have buggy firmware that reports
 #       incorrect state. Solution: use input_boolean helpers to track intended
 #       state. Also use staged turn-on (1% wake → color temp → brightness)
-#       with 150ms delays.
+#       with 150ms delays between stages, 300ms delays between individual lights.
 #
 # =============================================================================
 # SWITCHES:
-#   - Lounge Scene Switch – 3G (ZT-SY-EU) Glenn (MOES 3-button)
+#   - Lounge Scene Switch — 3G (ZT-SY-EU) Glenn (MOES 3-button)
 #   - Lounge Switch 3-Button (TS0043) Wall (Tuya 3-button)
 #
 # BUTTON MAPPING:
@@ -54,14 +59,14 @@ automation:
   # ===========================================================================
   # BUTTON 1 — Window Lights Toggle
   # ===========================================================================
-  # Triggered by either switch, uses helper for reliable state tracking
-  # ---------------------------------------------------------------------------
+  # Two Mercator lights commanded sequentially with 300ms gap
+  # ===========================================================================
   - id: lounge_btn1_window
     alias: "Lounge — Button 1 (Window Lights)"
-    description: "Toggle window downlights using helper state. On: 100%, 3000K, 3s fade."
+    description: "Toggle window downlights using helper state. Sequential commands for Zigbee reliability."
     triggers:
       - trigger: mqtt
-        topic: "zigbee2mqtt/Lounge Scene Switch – 3G (ZT-SY-EU) Glenn/action"
+        topic: "zigbee2mqtt/Lounge Scene Switch \u2014 3G (ZT-SY-EU) Glenn/action"
         payload: "1_single"
       - trigger: mqtt
         topic: "zigbee2mqtt/Lounge Switch 3-Button (TS0043) Wall/action"
@@ -78,9 +83,14 @@ automation:
                   entity_id: input_boolean.lounge_window_lights_on
               - action: light.turn_off
                 target:
-                  entity_id:
-                    - light.lounge_window_back_light
-                    - light.lounge_window_front_light
+                  entity_id: light.lounge_window_back_light
+                data:
+                  transition: 3
+              - delay:
+                  milliseconds: 300
+              - action: light.turn_off
+                target:
+                  entity_id: light.lounge_window_front_light
                 data:
                   transition: 3
         default:
@@ -89,9 +99,15 @@ automation:
               entity_id: input_boolean.lounge_window_lights_on
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_window_back_light
-                - light.lounge_window_front_light
+              entity_id: light.lounge_window_back_light
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_window_front_light
             data:
               brightness_pct: 1
               transition: 0
@@ -99,9 +115,15 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_window_back_light
-                - light.lounge_window_front_light
+              entity_id: light.lounge_window_back_light
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_window_front_light
             data:
               color_temp_kelvin: 3000
               transition: 0
@@ -109,9 +131,15 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_window_back_light
-                - light.lounge_window_front_light
+              entity_id: light.lounge_window_back_light
+            data:
+              brightness_pct: 100
+              transition: 3
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_window_front_light
             data:
               brightness_pct: 100
               transition: 3
@@ -123,10 +151,10 @@ automation:
   # ===========================================================================
   - id: lounge_btn2_middle
     alias: "Lounge — Button 2 (Middle Lights)"
-    description: "Toggle middle downlights using helper state. On: 100%, 3000K, 3s fade."
+    description: "Toggle middle downlights using helper state. Sequential commands for Zigbee reliability."
     triggers:
       - trigger: mqtt
-        topic: "zigbee2mqtt/Lounge Scene Switch – 3G (ZT-SY-EU) Glenn/action"
+        topic: "zigbee2mqtt/Lounge Scene Switch \u2014 3G (ZT-SY-EU) Glenn/action"
         payload: "2_single"
       - trigger: mqtt
         topic: "zigbee2mqtt/Lounge Switch 3-Button (TS0043) Wall/action"
@@ -143,9 +171,14 @@ automation:
                   entity_id: input_boolean.lounge_middle_lights_on
               - action: light.turn_off
                 target:
-                  entity_id:
-                    - light.lounge_middle_back_light
-                    - light.lounge_middle_front_light
+                  entity_id: light.lounge_middle_back_light
+                data:
+                  transition: 3
+              - delay:
+                  milliseconds: 300
+              - action: light.turn_off
+                target:
+                  entity_id: light.lounge_middle_front_light
                 data:
                   transition: 3
         default:
@@ -154,9 +187,15 @@ automation:
               entity_id: input_boolean.lounge_middle_lights_on
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_middle_back_light
-                - light.lounge_middle_front_light
+              entity_id: light.lounge_middle_back_light
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_middle_front_light
             data:
               brightness_pct: 1
               transition: 0
@@ -164,9 +203,15 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_middle_back_light
-                - light.lounge_middle_front_light
+              entity_id: light.lounge_middle_back_light
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_middle_front_light
             data:
               color_temp_kelvin: 3000
               transition: 0
@@ -174,9 +219,15 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_middle_back_light
-                - light.lounge_middle_front_light
+              entity_id: light.lounge_middle_back_light
+            data:
+              brightness_pct: 100
+              transition: 3
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_middle_front_light
             data:
               brightness_pct: 100
               transition: 3
@@ -188,10 +239,10 @@ automation:
   # ===========================================================================
   - id: lounge_btn3_tv
     alias: "Lounge — Button 3 (TV Lights)"
-    description: "Toggle TV downlights using helper state. On: 100%, 3000K, 3s fade."
+    description: "Toggle TV downlights using helper state. Sequential commands for Zigbee reliability."
     triggers:
       - trigger: mqtt
-        topic: "zigbee2mqtt/Lounge Scene Switch – 3G (ZT-SY-EU) Glenn/action"
+        topic: "zigbee2mqtt/Lounge Scene Switch \u2014 3G (ZT-SY-EU) Glenn/action"
         payload: "3_single"
       - trigger: mqtt
         topic: "zigbee2mqtt/Lounge Switch 3-Button (TS0043) Wall/action"
@@ -208,9 +259,14 @@ automation:
                   entity_id: input_boolean.lounge_tv_lights_on
               - action: light.turn_off
                 target:
-                  entity_id:
-                    - light.lounge_tv_back_light
-                    - light.lounge_tv_front_light
+                  entity_id: light.lounge_tv_back_light
+                data:
+                  transition: 3
+              - delay:
+                  milliseconds: 300
+              - action: light.turn_off
+                target:
+                  entity_id: light.lounge_tv_front_light
                 data:
                   transition: 3
         default:
@@ -219,9 +275,15 @@ automation:
               entity_id: input_boolean.lounge_tv_lights_on
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_tv_back_light
-                - light.lounge_tv_front_light
+              entity_id: light.lounge_tv_back_light
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_tv_front_light
             data:
               brightness_pct: 1
               transition: 0
@@ -229,9 +291,15 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_tv_back_light
-                - light.lounge_tv_front_light
+              entity_id: light.lounge_tv_back_light
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_tv_front_light
             data:
               color_temp_kelvin: 3000
               transition: 0
@@ -239,11 +307,35 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.lounge_tv_back_light
-                - light.lounge_tv_front_light
+              entity_id: light.lounge_tv_back_light
+            data:
+              brightness_pct: 100
+              transition: 3
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.lounge_tv_front_light
             data:
               brightness_pct: 100
               transition: 3
     mode: single
     max_exceeded: silent
+
+  # ===========================================================================
+  # SYNC HELPERS ON HA RESTART — Safe default: all OFF
+  # ===========================================================================
+  - id: lounge_helpers_sync_on_start
+    alias: "Lounge — Sync helpers on HA start"
+    description: "Reset lounge helpers to OFF on HA restart (safe default)"
+    triggers:
+      - trigger: homeassistant
+        event: start
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.lounge_window_lights_on
+            - input_boolean.lounge_middle_lights_on
+            - input_boolean.lounge_tv_lights_on
+    mode: single

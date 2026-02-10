@@ -2,9 +2,16 @@
 # SCENE SWITCHES PACKAGE
 # =============================================================================
 # File: packages/scene_switches.yaml
-# Revision: 4.0
+# Revision: 5.0
 # Created: 2026-01-29
-# Updated: 2026-01-29
+# Updated: 2026-02-10
+#
+# Changes in 5.0:
+#   - Sequential light commands with 300ms gaps for paired Mercator lights
+#     (prevents Zigbee mesh dropping commands when sent simultaneously)
+#   - kitchen_lighting.yaml DELETED — was duplicating these automations
+#     causing two competing automations per button press
+#   - Added max_exceeded: silent to all automations
 #
 # NOTE: Kitchen downlights use helper-based state tracking because the
 #       Mercator lights report incorrect state (says ON when physically OFF)
@@ -14,7 +21,7 @@
 #   Button 2: Ceiling light toggle - 100%, 6535K, 3s fade
 #   Button 3: Sink downlight toggle - 100%, 6535K, 3s fade
 #
-# DINING (Dining Scene Switch – 1G - TS0041 1-button):
+# DINING (Dining Scene Switch — 1G - TS0041 1-button):
 #   Single: Toggle - Whites 75%/2702K, Rings 100%/3400K
 #   Double: Bright - Whites 100%/3200K, Rings 100%/3400K
 #   Hold:   Party - Whites 100%/2702K, Rings GREEN
@@ -39,16 +46,17 @@ automation:
   # ===========================================================================
   # KITCHEN BUTTON 1 — Bench Downlights (uses helper for state)
   # ===========================================================================
+  # Two Mercator lights commanded sequentially with 300ms gap
+  # ===========================================================================
   - id: kitchen_btn1_bench
     alias: "Kitchen — Button 1 (Bench)"
-    description: "Toggle bench downlights using helper state"
+    description: "Toggle bench downlights using helper state. Sequential commands for Zigbee reliability."
     triggers:
       - trigger: mqtt
         topic: zigbee2mqtt/kitchen_scene_switch_3g/action
         payload: "1_single"
     actions:
       - choose:
-          # If helper says ON → turn OFF
           - conditions:
               - condition: state
                 entity_id: input_boolean.kitchen_bench_lights_on
@@ -59,21 +67,31 @@ automation:
                   entity_id: input_boolean.kitchen_bench_lights_on
               - action: light.turn_off
                 target:
-                  entity_id:
-                    - light.kitchen_downlight_bench_hall
-                    - light.kitchen_downlight_bench_window
+                  entity_id: light.kitchen_downlight_bench_hall
                 data:
                   transition: 3
-        # If helper says OFF → turn ON
+              - delay:
+                  milliseconds: 300
+              - action: light.turn_off
+                target:
+                  entity_id: light.kitchen_downlight_bench_window
+                data:
+                  transition: 3
         default:
           - action: input_boolean.turn_on
             target:
               entity_id: input_boolean.kitchen_bench_lights_on
           - action: light.turn_on
             target:
-              entity_id:
-                - light.kitchen_downlight_bench_hall
-                - light.kitchen_downlight_bench_window
+              entity_id: light.kitchen_downlight_bench_hall
+            data:
+              brightness_pct: 1
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.kitchen_downlight_bench_window
             data:
               brightness_pct: 1
               transition: 0
@@ -81,9 +99,15 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.kitchen_downlight_bench_hall
-                - light.kitchen_downlight_bench_window
+              entity_id: light.kitchen_downlight_bench_hall
+            data:
+              color_temp_kelvin: 3000
+              transition: 0
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.kitchen_downlight_bench_window
             data:
               color_temp_kelvin: 3000
               transition: 0
@@ -91,13 +115,20 @@ automation:
               milliseconds: 150
           - action: light.turn_on
             target:
-              entity_id:
-                - light.kitchen_downlight_bench_hall
-                - light.kitchen_downlight_bench_window
+              entity_id: light.kitchen_downlight_bench_hall
+            data:
+              brightness_pct: 100
+              transition: 3
+          - delay:
+              milliseconds: 300
+          - action: light.turn_on
+            target:
+              entity_id: light.kitchen_downlight_bench_window
             data:
               brightness_pct: 100
               transition: 3
     mode: single
+    max_exceeded: silent
 
   # ===========================================================================
   # KITCHEN BUTTON 2 — Ceiling Light (Aqara - reliable state)
@@ -139,9 +170,12 @@ automation:
               color_temp_kelvin: 6535
               transition: 3
     mode: single
+    max_exceeded: silent
 
   # ===========================================================================
   # KITCHEN BUTTON 3 — Sink Downlight (uses helper for state)
+  # ===========================================================================
+  # Single Mercator light — no sequential delay needed
   # ===========================================================================
   - id: kitchen_btn3_sink
     alias: "Kitchen — Button 3 (Sink)"
@@ -152,7 +186,6 @@ automation:
         payload: "3_single"
     actions:
       - choose:
-          # If helper says ON → turn OFF
           - conditions:
               - condition: state
                 entity_id: input_boolean.kitchen_sink_light_on
@@ -166,7 +199,6 @@ automation:
                   entity_id: light.kitchen_downlight_sink
                 data:
                   transition: 3
-        # If helper says OFF → turn ON
         default:
           - action: input_boolean.turn_on
             target:
@@ -194,13 +226,14 @@ automation:
               brightness_pct: 100
               transition: 3
     mode: single
+    max_exceeded: silent
 
   # ===========================================================================
-  # SYNC HELPERS ON HA RESTART — Set helpers to match current light state
+  # SYNC HELPERS ON HA RESTART — Safe default: all OFF
   # ===========================================================================
   - id: kitchen_helpers_sync_on_start
     alias: "Kitchen — Sync helpers on HA start"
-    description: "Reset helpers to OFF on HA restart (safe default)"
+    description: "Reset kitchen helpers to OFF on HA restart (safe default)"
     triggers:
       - trigger: homeassistant
         event: start
@@ -220,7 +253,7 @@ automation:
     description: "Toggle dining lights"
     triggers:
       - trigger: mqtt
-        topic: "zigbee2mqtt/Dining Scene Switch – 1G/action"
+        topic: "zigbee2mqtt/Dining Scene Switch \u2014 1G/action"
         payload: "single"
     actions:
       - choose:
@@ -270,6 +303,7 @@ automation:
                   color_temp_kelvin: 3400
                   transition: 3
     mode: single
+    max_exceeded: silent
 
   # ===========================================================================
   # DINING DOUBLE — Bright
@@ -279,7 +313,7 @@ automation:
     description: "Bright mode"
     triggers:
       - trigger: mqtt
-        topic: "zigbee2mqtt/Dining Scene Switch – 1G/action"
+        topic: "zigbee2mqtt/Dining Scene Switch \u2014 1G/action"
         payload: "double"
     actions:
       - parallel:
@@ -302,6 +336,7 @@ automation:
               color_temp_kelvin: 3400
               transition: 3
     mode: single
+    max_exceeded: silent
 
   # ===========================================================================
   # DINING HOLD — Party
@@ -311,10 +346,10 @@ automation:
     description: "Party mode - green rings"
     triggers:
       - trigger: mqtt
-        topic: "zigbee2mqtt/Dining Scene Switch – 1G/action"
+        topic: "zigbee2mqtt/Dining Scene Switch \u2014 1G/action"
         payload: "hold"
       - trigger: mqtt
-        topic: "zigbee2mqtt/Dining Scene Switch – 1G/action"
+        topic: "zigbee2mqtt/Dining Scene Switch \u2014 1G/action"
         payload: "long"
     actions:
       - parallel:
@@ -337,3 +372,4 @@ automation:
               rgb_color: [0, 255, 0]
               transition: 3
     mode: single
+    max_exceeded: silent
